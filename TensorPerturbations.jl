@@ -15,7 +15,6 @@ end
 begin
 import SymbolicUtils: Sym, FnType, Term, Add, Mul, Pow, similarterm
 using SymbolicUtils
-import Symbolics: _toexpr
 
 # Create a new number type simply for dispatch purposes.
 # Everytime you define a tensor manipulation system, you would define a new number type
@@ -59,14 +58,6 @@ name(x::Term{NewTensor}) = TensorDisplay(x).name
 # utility function
 intersperse(a::Vector; token = ",") = [(i % 2) == 0 ? token : a[i÷2 + 1] for i ∈ 1:(2*length(a)-1)]
 
-# Overload the _toexpr function in Symbolics to have this custom tensor term
-# display as you want it
-function _toexpr(x::Term{NewTensor})
-	is_linear = hasmetadata(operation(x),Type{Multilinear})
-	b = is_linear ?  ["[","]"] : ["(",")"]
-	Expr(:latexifymerge, operation(x),b[1], intersperse(arguments(x))..., b[2])
-end
-
 md"> Created a new Tensor type and defined it's displays"
 end
 
@@ -99,17 +90,73 @@ struct SymmetryStructure <: AbstractSlotStructure
 	indicies::Vector{Int64}
 end
 	
-struct Slots{T<:AbstractSlot, L<:AbstractSlotStructure}
-	slots::Vector{T}
-	slot_structures::Dict{DataType, L}
+struct Slots{N}
+	slot_structures::Dict{DataType, AbstractSlotStructure}
 end
+Slots{N}(x::AbstractSlotStructure) where {N} = Slots{N}(Dict([Type{typeof(x)} => x]))
 slot_structure(x::Slots) = x.slot_structures
+is_multilinear(x::Slots) = Type{MultilinearStructure} ∈ keys(x.slot_structures)
+is_multilinear(x::Term{NewTensor}) = is_multilinear(Slots(x))
+is_symmetric(x::Slots) = Type{SymmetryStructure} ∈ keys(x.slot_structures)
+is_symmetric(x::Term{NewTensor}) = is_multilinear(Slots(x))
 multilinear_indices(x::Slots) = x.slot_structures[Type{MultilinearStructure}].indices
 symmetric_indices(x::Slots) = x.slot_structures[Type{SymmetryStructure}].indices
 
-number_of_slots(x::Slots) = length(x.slots)
-number_of_slots(x::Term{NewTensor}) = number_of_slots(getmetadata(operation(x),Type{Slots}))
+Slots(x::Term{NewTensor}) = getmetadata(operation(x),Type{Slots})
+	
+number_of_slots(x::Slots{N}) where {N} = N
+number_of_slots(x::Term{NewTensor}) = number_of_slots(Slots(x))
+	
+md"> Created a new Slot type"
+end
 
+# ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
+begin
+import Symbolics: _toexpr
+
+variable(s::AbstractString) = Sym{Number}(Symbol(s))
+function variable(s::AbstractString, x::Dict{DataType,S}) where S
+	var = variable(s)
+	for (t,p) ∈ x
+		var = setmetadata(var, t, p)
+	end
+	var
+end
+variable(s::Union{AbstractString,TensorDisplay}, x::Pair{DataType, S}) where {K,S} = setmetadata(variable(str(s)), x.first, x.second)
+
+operator(s::TensorDisplay, K::Slots{N}) where {N} = setmetadata(setmetadata(Sym{FnType{NTuple{N,Number},NewTensor}}(Symbol(str(s))), Type{TensorDisplay}, s),Type{Slots},K)
+operator(s::TensorDisplay, K::Slots, x::Pair{DataType, S}) where {S} = setmetadata(operator(s),x.first, x.second)
+
+function operator(s::TensorDisplay, sl::Slots, x::Dict{DataType,S}) where {S}
+	op = operator(s,sl)
+	for (t,p) ∈ x
+		op = setmetadata(op, t, p)
+	end
+	op
+end
+
+# Overload the _toexpr function in Symbolics to have this custom tensor term
+# display as you want it
+function _toexpr(x::Term{NewTensor})
+	is_linear = is_multilinear(x)
+	b = is_linear ?  ["[","]"] : ["(",")"]
+	Expr(:latexifymerge, operation(x),b[1], intersperse(arguments(x))..., b[2])
+end
+
+
+md"> Created a custom function to create a new variable with metadata and a new operator variable with a particular display and number of slots"
+end
+
+# ╔═╡ c193c17d-8eb1-4570-b97a-21e9416f0e08
+begin
+TheSlots = Slots{2}(SymmetryStructure([1,2]))
+F = operator(TensorDisplay("\\mathcal{F}","\\textrm{int}","AB"),TheSlots)
+@syms x y
+F(x,y)
+end
+
+# ╔═╡ 893d798e-7376-43bc-99b1-2e65f45f1c18
+begin
 sort_term(x) = x
 sort_term(x::Add) = similar_term()
 candidate_term(x, ::Type{<:AbstractSlotStructure}) = false
@@ -131,38 +178,8 @@ function sort_term(x::Term{NewTensor}, t::Type{SymmetryStructure})
 	new_args = [i ? sym_args[findfirst(x -> x==i, inds)] : args[i] for i ∈ 1:N_slots]
 	similarterm(x, operation(x), new_args)
 end
-	
-md"> Created a new Slot type"
-end
 
-# ╔═╡ 668c58b0-8062-4bcb-af12-a1aa209b0ce5
-
-
-# ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
-begin
-
-variable(s::AbstractString) = Sym{Number}(Symbol(s))
-function variable(s::AbstractString, x::Dict{DataType,S}) where S
-	var = variable(s)
-	for (t,p) ∈ x
-		var = setmetadata(var, t, p)
-	end
-	var
-end
-variable(s::Union{AbstractString,TensorDisplay}, x::Pair{DataType, S}) where {K,S} = setmetadata(variable(str(s)), x.first, x.second)
-
-operator(s::TensorDisplay, ::Type{K}) where {N, K <: Slots{N}} = setmetadata(setmetadata(Sym{FnType{NTuple{N,Number},NewTensor}}(Symbol(str(s))), Type{TensorDisplay}, s),Type{Slots},K)
-operator(s::TensorDisplay, ::Type{K}, x::Pair{DataType, S}) where {K,S} = setmetadata(operator(s),x.first, x.second)
-
-function operator(s::TensorDisplay, sl::Type{K}, x::Dict{DataType,S}) where {K,S}
-	op = operator(s,sl)
-	for (t,p) ∈ x
-		op = setmetadata(op, t, p)
-	end
-	op
-end
-
-md"> Created a custom function to create a new variable with metadata and a new operator variable with a particular display and number of slots"
+md"> Did slot sorting"
 end
 
 # ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
@@ -1054,8 +1071,9 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
 # ╠═977b2170-886d-40d8-ada2-29385c8c8bde
 # ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
-# ╠═668c58b0-8062-4bcb-af12-a1aa209b0ce5
 # ╠═004ab9ee-4562-421a-ad7c-eaa91c8f96db
+# ╠═c193c17d-8eb1-4570-b97a-21e9416f0e08
+# ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
 # ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
