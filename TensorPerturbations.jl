@@ -11,6 +11,64 @@ begin
 	md"# Tensor Perturbations"
 end
 
+# ╔═╡ 977b2170-886d-40d8-ada2-29385c8c8bde
+begin
+import SymbolicUtils: Sym, FnType, Term, Add, Mul, Pow, similarterm
+using SymbolicUtils
+import Symbolics: _toexpr
+
+# Create a new number type simply for dispatch purposes.
+# Everytime you define a tensor manipulation system, you would define a new number type
+
+struct NewTensor <: Number end
+
+# Create a TensorDisplay module
+abstract type AbstractTensorDisplay end
+
+"""
+This contains all the info to display a tensor 
+"""
+struct TensorDisplay{T <: AbstractString} <: AbstractTensorDisplay
+	name::T
+	sub::T
+	sup::T
+end
+
+TensorDisplay(name::AbstractString; sub="", super="") = TensorDisplay(name,sub,super)
+
+"""
+Function to extract the latex representation of the TensorDisplay as a string. 
+ex: str(TensorDisplay("T","a","\textrm{int}")) = "T_{a}^{\textrm{int}}"
+"""
+function str(x::TensorDisplay)
+	sub = x.sub == "" ? "" : "_{$(x.sub)}"
+	sup = x.sup == "" ? "" : "^{$(x.sup)}"
+	"$(x.name)$(sup)$(sub)" 
+end
+str(x::AbstractString) = x
+subscript(x::TensorDisplay) = x.sub
+superscript(x::TensorDisplay) = x.sup
+name(x::TensorDisplay) = x.name
+
+# Define the Display properties of the NewTensor type
+TensorDisplay(x::Term{NewTensor}) = getmetadata(operation(x),Type{TensorDisplay})
+subscript(x::Term{NewTensor}) = TensorDisplay(x).sub
+superscript(x::Term{NewTensor}) = TensorDisplay(x).sup
+name(x::Term{NewTensor}) = TensorDisplay(x).name
+
+# utility function
+intersperse(a::Vector; token = ",") = [(i % 2) == 0 ? token : a[i÷2 + 1] for i ∈ 1:(2*length(a)-1)]
+
+# Overload the _toexpr function in Symbolics to have this custom tensor term
+# display as you want it
+function _toexpr(x::Term{NewTensor})
+	is_linear = hasmetadata(operation(x),Type{Multilinear})
+	b = is_linear ?  ["[","]"] : ["(",")"]
+	Expr(:latexifymerge, operation(x),b[1], intersperse(arguments(x))..., b[2])
+end
+md"> Created a new Tensor type and defined it's displays"
+end
+
 # ╔═╡ 9bd50b69-1f6d-4a5a-855e-15d70657742f
 begin
 md"""
@@ -24,6 +82,40 @@ Every operator has a property stored in a struct called `TensorDisplay`. This ke
 In and of itself, the operator is nothing but a pretty display. The real power of the operator is that it is a function that accepts things in slots. Each operator has a particular structure in it's slots. The two structures we have implemented are _Multilinearity_ and _SlotSymmetry_.
 
 """
+end
+
+# ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
+begin
+
+struct Slots{N} end
+
+_slot(::Type{Slots{N}}) where {N} = N
+Slots(x::Term{NewTensor}) = _slot(getmetadata(operation(x),Type{Slots}))
+
+
+
+variable(s::AbstractString) = Sym{Number}(Symbol(s))
+function variable(s::AbstractString, x::Dict{DataType,S}) where S
+	var = variable(s)
+	for (t,p) ∈ x
+		var = setmetadata(var, t, p)
+	end
+	var
+end
+variable(s::Union{AbstractString,TensorDisplay}, x::Pair{DataType, S}) where {K,S} = setmetadata(variable(str(s)),x.first, x.second)
+
+operator(s::TensorDisplay, ::Type{K}) where {N, K <: Slots{N}} = setmetadata(setmetadata(Sym{FnType{NTuple{N,Number},NewTensor}}(Symbol(str(s))), Type{TensorDisplay}, s),Type{Slots},K)
+operator(s::TensorDisplay, ::Type{K}, x::Pair{DataType, S}) where {K,S} = setmetadata(operator(s),x.first, x.second)
+
+function operator(s::TensorDisplay, sl::Type{K}, x::Dict{DataType,S}) where {K,S}
+	op = operator(s,sl)
+	for (t,p) ∈ x
+		op = setmetadata(op, t, p)
+	end
+	op
+end
+
+md"> Created a custom function to create a new variable with metadata and a new operator variable with a particular display and number of slots"
 end
 
 # ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
@@ -81,11 +173,13 @@ end
 begin
 md"""
 #### Operator Expansions
-We can also take general expressions of non-linear operators that depend on perturbations, and then expand them to linear operators. So for example:
+We can also take general expressions of non-linear operators that depend on perturbations, and then expand them to multilinear operators that are totally symmetric in each particular *type* of slot. So for example:
 
 ```math
 F(g+\epsilon h,\theta + \eta\phi) = F + \eta F^{[0,1]}[\phi] + \epsilon F^{[1,0]}[h] + \eta\epsilon F^{[1,1]}[h,\phi] + ...
 ```
+
+
 """
 end
 
@@ -93,10 +187,12 @@ end
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
+SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
 LaTeXStrings = "~1.3.0"
+SymbolicUtils = "~0.19.7"
 Symbolics = "~4.4.3"
 """
 
@@ -909,6 +1005,8 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╔═╡ Cell order:
 # ╟─4c467392-ccde-11ec-15c0-4f532000315f
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
+# ╠═977b2170-886d-40d8-ada2-29385c8c8bde
+# ╠═004ab9ee-4562-421a-ad7c-eaa91c8f96db
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
 # ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
