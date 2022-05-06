@@ -66,6 +66,7 @@ function _toexpr(x::Term{NewTensor})
 	b = is_linear ?  ["[","]"] : ["(",")"]
 	Expr(:latexifymerge, operation(x),b[1], intersperse(arguments(x))..., b[2])
 end
+
 md"> Created a new Tensor type and defined it's displays"
 end
 
@@ -84,15 +85,61 @@ In and of itself, the operator is nothing but a pretty display. The real power o
 """
 end
 
-# ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
+# ╔═╡ eb6f19bd-f750-478b-967e-39710e4f42c2
 begin
 
-struct Slots{N} end
+abstract type AbstractSlot end
+struct Slot <: AbstractSlot end
 
-_slot(::Type{Slots{N}}) where {N} = N
-Slots(x::Term{NewTensor}) = _slot(getmetadata(operation(x),Type{Slots}))
+abstract type AbstractSlotStructure end
+struct MultilinearStructure <: AbstractSlotStructure
+	indicies::Vector{Int64}
+end
+struct SymmetryStructure <: AbstractSlotStructure
+	indicies::Vector{Int64}
+end
+	
+struct Slots{T<:AbstractSlot, L<:AbstractSlotStructure}
+	slots::Vector{T}
+	slot_structures::Dict{DataType, L}
+end
+slot_structure(x::Slots) = x.slot_structures
+multilinear_indices(x::Slots) = x.slot_structures[Type{MultilinearStructure}].indices
+symmetric_indices(x::Slots) = x.slot_structures[Type{SymmetryStructure}].indices
+
+number_of_slots(x::Slots) = length(x.slots)
+number_of_slots(x::Term{NewTensor}) = number_of_slots(getmetadata(operation(x),Type{Slots}))
+
+sort_term(x) = x
+sort_term(x::Add) = similar_term()
+candidate_term(x, ::Type{<:AbstractSlotStructure}) = false
+function candidate_term(x::Term{NewTensor}, t::Type{SymmetryStructure})
+	inds = slot_structure(operation(x))[t].indicies
+	args = arguments(x)
+	N_slots = number_of_slots(x)
+	#sym_args = sort([args[i] for i ∈ inds], by=hash)
+	issorted([args[i] for i ∈ inds], by=hash)
+	#new_args = [i ? sym_args[findfirst(x -> x==i, inds)] for i ∈ 1:N_slots]
+	#similarterm(x, operation(x),new_args)
+end
+function sort_term(x::Term{NewTensor}, t::Type{SymmetryStructure})
+	inds = slot_structure(operation(x))[t].indicies
+	args = arguments(x)
+	N_slots = number_of_slots(x)
+	sym_args = sort([args[i] for i ∈ inds], by=hash)
+	#issorted([args[i] for i ∈ inds], by=hash)
+	new_args = [i ? sym_args[findfirst(x -> x==i, inds)] : args[i] for i ∈ 1:N_slots]
+	similarterm(x, operation(x), new_args)
+end
+	
+md"> Created a new Slot type"
+end
+
+# ╔═╡ 668c58b0-8062-4bcb-af12-a1aa209b0ce5
 
 
+# ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
+begin
 
 variable(s::AbstractString) = Sym{Number}(Symbol(s))
 function variable(s::AbstractString, x::Dict{DataType,S}) where S
@@ -102,7 +149,7 @@ function variable(s::AbstractString, x::Dict{DataType,S}) where S
 	end
 	var
 end
-variable(s::Union{AbstractString,TensorDisplay}, x::Pair{DataType, S}) where {K,S} = setmetadata(variable(str(s)),x.first, x.second)
+variable(s::Union{AbstractString,TensorDisplay}, x::Pair{DataType, S}) where {K,S} = setmetadata(variable(str(s)), x.first, x.second)
 
 operator(s::TensorDisplay, ::Type{K}) where {N, K <: Slots{N}} = setmetadata(setmetadata(Sym{FnType{NTuple{N,Number},NewTensor}}(Symbol(str(s))), Type{TensorDisplay}, s),Type{Slots},K)
 operator(s::TensorDisplay, ::Type{K}, x::Pair{DataType, S}) where {K,S} = setmetadata(operator(s),x.first, x.second)
@@ -1006,6 +1053,8 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─4c467392-ccde-11ec-15c0-4f532000315f
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
 # ╠═977b2170-886d-40d8-ada2-29385c8c8bde
+# ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
+# ╠═668c58b0-8062-4bcb-af12-a1aa209b0ce5
 # ╠═004ab9ee-4562-421a-ad7c-eaa91c8f96db
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
