@@ -11,6 +11,57 @@ begin
 	md"# Tensor Perturbations"
 end
 
+# ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
+md"""
+What are the main components of this package and how do they work together?
+
+### Operators
+You can define operator types. Examples include something like $T_{[\textrm{int}]}^{(1,2)}[g^0,h^0]$ or $\hat{H}|\psi>$. The first main thing an operator can do, is display itself. 
+
+Every operator has a property stored in a struct called `TensorDisplay`. This keeps the latex display of the operator head, the subscript and the superscript. One can also override the `_toexpr` function to get the correct display for latexify. 
+
+In and of itself, the operator is nothing but a pretty display. The real power of the operator is that it is a function that accepts things in slots. Each operator has a particular structure in it's slots. The two structures we have implemented are _Multilinearity_ and _SlotSymmetry_.
+
+#### Slots
+There are `operators`with `Slots`, where the slots can have many `SlotStructures`, they can be:
+- `Multilinear` under a particular subset of Slots or/and
+- `Symmetric` under a particular subset of Slots
+The methods that help use these simplifications are:
+
+|SlotStructure| Method|
+|-------------|--------------|
+|`Multilinear`|`expand_linear`|
+|`Symmetric`|`canonicalize`|
+
+> How does one `expand_linear`?
+>
+> - Well you look at a candidate term, and see all it's arguments, and find which slot they belong to.
+> - Make a list of arguments in linear slots. First run the `expand` function on the terms in the argument list.
+>   - If the argument is an `Add` run `arguments(term)` to get a list of arguments
+>   - If the argument is anything else, just encapsulate it in a list.
+> - Now loop over everything in this list of lists.
+>   - If the argument is a `Mul` seperate it into scalars and non-scalars. There should be a function `is_scalar(x::CandidateTerm, y::Type{<:Multilinear})` defined for this particular subtype of `Multilinear`, which can be used to take a `Mul` and seperate it into scalars and non-scalars.
+>   - `scalar_seperate(x) = (1,x)` while `scalar_seperate(x::Mul) = do the calculation...`
+> - Now you have a list of list of tuples. Loop over the outer product the list of lists and use that to construct a term like `prod(x[1])*similarterm(term, operation(term), arguments(x[2]))` (something like that...)
+
+This makes sense
+
+> How does one `canonicalize`?
+>
+> - Well you look at a candidate term, see all it's arguments, and find which slots belong to a particular symmetry structure.
+> - Actually I think one would just have to do `ButlerPortugalCanonicalization`
+
+Right now we actually want to only support `TotallySymmetric` slot structures. 
+In this, it's particularly straightforward. 
+> How does one `canonicalize` a `TotallySymmetric` slot structure?
+> - Define a lexical ordering `≤ₒ` function that acts on symbolic types.
+> - Go to all arguments of a candidate term, and if thety have a TotallySymmetric slot structure, then order them based on the lexical ordering function.
+> - That's it.
+
+#### Perturbations
+We can also define perturbation variables and expand perturbations in multiple scalars
+"""
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -829,6 +880,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 """
 
 # ╔═╡ Cell order:
-# ╠═4c467392-ccde-11ec-15c0-4f532000315f
+# ╟─4c467392-ccde-11ec-15c0-4f532000315f
+# ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
