@@ -11,7 +11,8 @@ begin
 	md"# Tensor Perturbations"
 end
 
-# ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
+# ╔═╡ 9bd50b69-1f6d-4a5a-855e-15d70657742f
+begin
 md"""
 What are the main components of this package and how do they work together?
 
@@ -22,6 +23,11 @@ Every operator has a property stored in a struct called `TensorDisplay`. This ke
 
 In and of itself, the operator is nothing but a pretty display. The real power of the operator is that it is a function that accepts things in slots. Each operator has a particular structure in it's slots. The two structures we have implemented are _Multilinearity_ and _SlotSymmetry_.
 
+"""
+end
+
+# ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
+md"""
 #### Slots
 There are `operators`with `Slots`, where the slots can have many `SlotStructures`, they can be:
 - `Multilinear` under a particular subset of Slots or/and
@@ -57,10 +63,31 @@ In this, it's particularly straightforward.
 > - Define a lexical ordering `≤ₒ` function that acts on symbolic types.
 > - Go to all arguments of a candidate term, and if thety have a TotallySymmetric slot structure, then order them based on the lexical ordering function.
 > - That's it.
-
-#### Perturbations
-We can also define perturbation variables and expand perturbations in multiple scalars
 """
+
+# ╔═╡ 6859d3fc-1499-449d-b181-ddd970b02120
+begin
+md"""
+#### Perturbations
+We can also define perturbation variables and expand perturbations in multiple scalars. These perturbation variables aren't really very different from normal variables but they carry something like a tag saying I am a *something* type of perturbation and I am of order *n*. 
+
+Whenever you ask for the expansion order of any particular expression, you also need to provide a list of perturbation types you care about. These are held in a type of object called `PerturbationParameters` which just hold perturbation parameters that are deemed of current use, and this parameter is passed around whenever we want to do any calculation which is an expansion or some sort of simplification. 
+
+An important method is `pert(x, Ξ::PerturbationParameter)` which will take an expression and attempt to tell you the order of the expression with respect to each of the perturbation parameters in Ξ. 
+"""
+end
+
+# ╔═╡ 83a84e8e-45b5-4189-b95c-06764b5635cc
+begin
+md"""
+#### Operator Expansions
+We can also take general expressions of non-linear operators that depend on perturbations, and then expand them to linear operators. So for example:
+
+```math
+F(g+\epsilon h,\theta + \eta\phi) = F + \eta F^{[0,1]}[\phi] + \epsilon F^{[1,0]}[h] + \eta\epsilon F^{[1,1]}[h,\phi] + ...
+```
+"""
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -881,6 +908,9 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 
 # ╔═╡ Cell order:
 # ╟─4c467392-ccde-11ec-15c0-4f532000315f
+# ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
+# ╟─6859d3fc-1499-449d-b181-ddd970b02120
+# ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
