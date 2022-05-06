@@ -84,23 +84,29 @@ struct Slot <: AbstractSlot end
 
 abstract type AbstractSlotStructure end
 struct MultilinearStructure <: AbstractSlotStructure
-	indicies::Vector{Int64}
+	indices::Vector{Int64}
 end
 struct SymmetryStructure <: AbstractSlotStructure
-	indicies::Vector{Int64}
+	indices::Vector{Vector{Int64}}
 end
 	
 struct Slots{N}
 	slot_structures::Dict{DataType, AbstractSlotStructure}
 end
-Slots{N}(x::AbstractSlotStructure) where {N} = Slots{N}(Dict([Type{typeof(x)} => x]))
+Slots{N}(x::AbstractSlotStructure...) where {N} = Slots{N}(Dict([Type{typeof(x1)} => x1 for x1 in x]))
+	
 slot_structure(x::Slots) = x.slot_structures
+	
 is_multilinear(x::Slots) = Type{MultilinearStructure} ∈ keys(x.slot_structures)
 is_multilinear(x::Term{NewTensor}) = is_multilinear(Slots(x))
 is_symmetric(x::Slots) = Type{SymmetryStructure} ∈ keys(x.slot_structures)
 is_symmetric(x::Term{NewTensor}) = is_multilinear(Slots(x))
+	
 multilinear_indices(x::Slots) = x.slot_structures[Type{MultilinearStructure}].indices
 symmetric_indices(x::Slots) = x.slot_structures[Type{SymmetryStructure}].indices
+	
+is_fully_multilinear(x::Slots{N}) where {N} = is_multilinear(x) && (Set(multilinear_indices(x)) == Set(1:N))
+is_fully_multilinear(x::Term{NewTensor}) = is_fully_multilinear(Slots(x))
 
 Slots(x::Term{NewTensor}) = getmetadata(operation(x),Type{Slots})
 	
@@ -108,6 +114,50 @@ number_of_slots(x::Slots{N}) where {N} = N
 number_of_slots(x::Term{NewTensor}) = number_of_slots(Slots(x))
 	
 md"> Created a new Slot type"
+end
+
+# ╔═╡ 1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
+begin
+function partial_reorder(main_list::Vector, symmetry::Vector; by=identity)
+	reorder = symmetry[sortperm(main_list[symmetry]; by=by)]
+	result = collect(1:length(main_list))
+	result2 = 1:length(main_list)
+	for i ∈ 1:length(symmetry)
+		if symmetry[i] != reorder[i]
+			result[symmetry[i]] = result2[reorder[i]]
+		end
+	end
+	main_list[result]
+end
+
+function partial_reorder(main_list::Vector, symmetry_list::Vector{Vector{T}}; by=identity) where {T}
+	p = main_list
+	for symmetry in symmetry_list
+		p = partial_reorder(p, symmetry; by=by)
+	end
+	p
+end
+
+
+already_partially_ordered(x; by=hash) = true
+function already_partially_ordered(x::Term{NewTensor}; by=hash)
+	args = arguments(x)
+	sym_inds = symmetric_indices(Slots(x))
+	ordered_args = sort(args; by=hash)
+	for i in 1:length(args)
+		if by(args[i]) != by(ordered_args[i])
+			return false
+		end
+	end
+	return true
+end
+
+canonicalize_term(x; by=hash) = x
+function canonicalize_term(x::Term{NewTensor}; by=hash)
+	args = partial_reorder(arguments(x),symmetric_indices(Slots(x));by=by)
+	similarterm(x,operation(x),args)
+end
+md"> Symmetry canonicalizations"
 end
 
 # ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
@@ -138,7 +188,7 @@ end
 # Overload the _toexpr function in Symbolics to have this custom tensor term
 # display as you want it
 function _toexpr(x::Term{NewTensor})
-	is_linear = is_multilinear(x)
+	is_linear = is_fully_multilinear(x)
 	b = is_linear ?  ["[","]"] : ["(",")"]
 	Expr(:latexifymerge, operation(x),b[1], intersperse(arguments(x))..., b[2])
 end
@@ -149,11 +199,25 @@ end
 
 # ╔═╡ c193c17d-8eb1-4570-b97a-21e9416f0e08
 begin
-TheSlots = Slots{2}(SymmetryStructure([1,2]))
+TheSlots = Slots{2}(SymmetryStructure([[1,2]]),MultilinearStructure([1,2]))
 F = operator(TensorDisplay("\\mathcal{F}","\\textrm{int}","AB"),TheSlots)
 @syms x y
 F(x,y)
 end
+
+# ╔═╡ 9fb6152d-a58e-4503-b237-6d5470e65f43
+begin
+import SymbolicUtils: Postwalk, Fixpoint, Prewalk, PassThrough
+
+r = @rule ~x::(z -> !already_partially_ordered(z)) => canonicalize_term(x)
+canonicalize(x) = simplify(x, Prewalk(PassThrough(r)))
+
+
+F(x,y) + F(y,x) |> canonicalize
+end
+
+# ╔═╡ f4a240c6-bb13-4422-bc9f-5bf555338f10
+Slots(F(x,y))
 
 # ╔═╡ 893d798e-7376-43bc-99b1-2e65f45f1c18
 begin
@@ -1071,8 +1135,11 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
 # ╠═977b2170-886d-40d8-ada2-29385c8c8bde
 # ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
+# ╠═1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
+# ╠═9fb6152d-a58e-4503-b237-6d5470e65f43
 # ╠═004ab9ee-4562-421a-ad7c-eaa91c8f96db
 # ╠═c193c17d-8eb1-4570-b97a-21e9416f0e08
+# ╠═f4a240c6-bb13-4422-bc9f-5bf555338f10
 # ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
