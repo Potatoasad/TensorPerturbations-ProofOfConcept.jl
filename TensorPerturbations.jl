@@ -238,7 +238,7 @@ argument_should_expand(x::Sym, s::Type{<:MultilinearSlotStructure}) = false
 argument_should_expand(x::Add, s::Type{<:MultilinearSlotStructure}) = true
 argument_should_expand(x::Mul, s::Type{<:MultilinearSlotStructure}) = any((x -> is_scalar(x,s)).(arguments(x)))
 
-seperate_scalars(x::Mul, s::Type{<:MultilinearSlotStructure}) = [arguments(x)]
+#seperate_scalars(x::Mul, s::Type{<:MultilinearSlotStructure}) = [arguments(x)]
 
 function expand_additions(x,s::Type{<:MultilinearSlotStructure})
 	is_scalar(x,s) ? (x,1) : (1,x)
@@ -254,7 +254,7 @@ function expand_additions(x::Mul, s::Type{<:MultilinearSlotStructure})
 	if length(non_scalars) == 0
 		non_scalars = [1]
 	end
-	Tuple([*(scalars...),*(non_scalars...)])
+	Tuple([operation(x)(scalars...),operation(x)(non_scalars...)])
 end
 make_list_if_not(x) = [x]
 make_list_if_not(x::Vector) = x
@@ -263,9 +263,10 @@ expand_additions(s::Type{<:MultilinearSlotStructure}) = (x -> expand_additions(x
 
 function expand_linear(x::Term{NewTensor}, s::Type{<:MultilinearSlotStructure})
 	F = operation(x)
-	arg_tuples = make_list_if_not.(expand_additions(s).(expand.(arguments(x))))
-	newstuff = Iterators.product(arg_tuples...) |> collect |> vec
-	sum([prod([s[1] for s ∈ a])*F([s[2] for s ∈ a]...) for a ∈ newstuff])
+	arg_tuples = expand_additions(s).(expand.(arguments(x)))
+	#arg_tuples = make_list_if_not.(expand_additions(s).(expand.(arguments(x))))
+	#newstuff = Iterators.product(arg_tuples...) |> collect |> vec
+	#sum([prod([p[1] for p ∈ a])*F([p[2] for p ∈ a]...) for a ∈ newstuff])
 end
 expand_linear(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear(x,s))
 	
@@ -305,28 +306,58 @@ filter(x::Add, ps::Vector{DataType}, i_vec::Vector{<:Integer}) where {T <: Pertu
 function seperate_orders(x::Union{Add,Mul,Pow}, ps::Union{APT,Vector{DataType},DataType}) 
 	new = expand(x)
 	thedicts = [Dict([Tuple(pert(a,ps)) => a]) for a ∈ arguments(new)]
-	final_dict = merge(operation(x), thedicts...)
-	final_dict
+	#final_dict = merge(operation(x), thedicts...)
+	#final_dict
 end
+seperate_orders(ps::Union{APT,Vector{DataType},DataType}) = (x->seperate_orders(x,ps))
 
 
 struct Background <: PerturbationOrder end
 struct Wave <: PerturbationOrder end
-ϵ = variable("\\epsilon", Background => 1)
-η = variable("\\eta", Wave => 1)
-Ξ = PerturbationParameters(Dict([Background => ϵ, Wave => η]))
+ϵ = variable("\\epsilon", Type{:Background} => 1)
+η = variable("\\eta", Type{:Wavew} => 1)
+Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wavew} => η]))
 	
 md"> Adding Perturbations"
+
+aa = F(ϵ*x + η*y,y)
+#aa = expand_linear(aa,Multilinear)
+#check = (arguments(aa)[1] |> arguments)[1] 
+#(check.metadata |> keys |> collect)[1]
 end
 
-# ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
-F(ϵ*x + η*y,y)|> expand_linear(Multilinear)
+# ╔═╡ 2e4aeb4f-eea0-476f-94cf-919237899dd2
+Type{:Background}
 
-# ╔═╡ fd777d6a-2f12-4cf4-b390-f43ad70e3ea6
-collect(keys(ϵ.metadata))[1] isa PerturbationOrder
+# ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
+(arguments(aa[1][2][1])[1].metadata |> keys |> collect)[1]
+
+# ╔═╡ 2fcb430c-96df-4480-9db2-5ef6ec630e98
+(x -> arguments(arguments(x[1])[2])[1].metadata)(arguments(aa))
+
+# ╔═╡ 0f5bf7ee-c19c-4cf8-bb29-a49b051432bb
+((expand.(arguments(aa)))[1] |> (x -> arguments(arguments(x)[2])[1])).metadata
+
+# ╔═╡ 92d2b55b-42a7-4486-871d-cb688e0149c5
+(arguments(arguments(aa[1])[2])[1].metadata |> keys |> collect)
+
+# ╔═╡ 5d29f5a5-ab4b-46a1-a088-834003926034
+(η.metadata |> keys |> collect)[1] |> typeof
+
+# ╔═╡ c6b75e26-b9d7-46a2-b8f3-aee30df320de
+(expand_additions(η*ϵ*x + 3,Multilinear))
+
+# ╔═╡ 5bd0de68-c017-4d61-9889-2629ffb56cf6
+(η.metadata |> keys |> collect)[1]
+
+# ╔═╡ 6a98a963-c288-4f15-9f31-a6c21b6fd36a
+begin
+struct Ali end
+a = Dict([Ali => 3])
+end
 
 # ╔═╡ a62433a3-d4a1-4ab1-bbf7-837701f9fb68
-is_scalar(y,Multilinear)
+collect(keys(a))[1]
 
 # ╔═╡ 53e01eba-125c-4a20-b156-46ae2352d69a
 argument_should_expand(arguments(F(2*x,y+4))[2], Multilinear)
@@ -1234,8 +1265,15 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═f4a240c6-bb13-4422-bc9f-5bf555338f10
 # ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
 # ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
+# ╠═2e4aeb4f-eea0-476f-94cf-919237899dd2
 # ╠═0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
-# ╠═fd777d6a-2f12-4cf4-b390-f43ad70e3ea6
+# ╠═2fcb430c-96df-4480-9db2-5ef6ec630e98
+# ╠═0f5bf7ee-c19c-4cf8-bb29-a49b051432bb
+# ╠═92d2b55b-42a7-4486-871d-cb688e0149c5
+# ╠═5d29f5a5-ab4b-46a1-a088-834003926034
+# ╠═c6b75e26-b9d7-46a2-b8f3-aee30df320de
+# ╠═5bd0de68-c017-4d61-9889-2629ffb56cf6
+# ╠═6a98a963-c288-4f15-9f31-a6c21b6fd36a
 # ╠═a62433a3-d4a1-4ab1-bbf7-837701f9fb68
 # ╠═53e01eba-125c-4a20-b156-46ae2352d69a
 # ╠═921085c6-a61b-4f1b-be73-65c38d00e26d
