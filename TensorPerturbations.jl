@@ -107,7 +107,7 @@ slot_structure(x::Slots) = x.slot_structures
 is_multilinear(x::Slots) = Type{Multilinear} ∈ keys(x.slot_structures)
 is_multilinear(x::Term{NewTensor}) = is_multilinear(Slots(x))
 is_symmetric(x::Slots) = Type{TotalSymmetry} ∈ keys(x.slot_structures)
-is_symmetric(x::Term{NewTensor}) = is_multilinear(Slots(x))
+is_symmetric(x::Term{NewTensor}) = is_symmetric(Slots(x))
 	
 multilinear_indices(x::Slots) = x.slot_structures[Type{Multilinear}].indices
 symmetric_indices(x::Slots) = x.slot_structures[Type{TotalSymmetry}].indices
@@ -195,6 +195,9 @@ end
 
 already_partially_ordered(x; by=hash) = true
 function already_partially_ordered(x::Term{NewTensor}; by=hash)
+	if !is_symmetric(x)
+		return true
+	end
 	args = arguments(x)
 	sym_inds = symmetric_indices(Slots(x))
 	ordered_args = sort(args; by=hash)
@@ -342,11 +345,8 @@ F(ϵ*x + η*y,y) |> expand_linear(Multilinear)
 # ╔═╡ 9b991e37-3edd-4c2b-8409-b28da7ccb326
 F(ϵ*x + η*y,y) |> (x -> is_multilinear(x))
 
-# ╔═╡ 6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
-
-
 # ╔═╡ 2e4aeb4f-eea0-476f-94cf-919237899dd2
-ll = aa |> expand_linear(Multilinear) |> seperate_orders(Ξ)
+
 
 # ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
 ll[(0,1)]
@@ -356,6 +356,46 @@ g0 = variable("g_0",Dict([Type{NotScalar{Multilinear}} => true]))
 
 # ╔═╡ 60d81965-801c-479b-951c-5742a1ed86aa
 g1 = variable("g_1",Dict([Type{NotScalar{Multilinear}} => true]))
+
+# ╔═╡ 6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
+begin
+
+abstract type AbstractAnalyticOperator <: AbstractSlotStructure end
+
+# at the moment assume complete analyticity over all non perturbative slots
+struct AnalyticOperator <: AbstractAnalyticOperator 
+	indices::Vector{Int64}
+end
+
+is_analytic(x::Slots) = Type{Multilinear} ∈ keys(x.slot_structures)
+is_analytic(x::Term{NewTensor}) = is_multilinear(Slots(x))
+analytic_indices(x::Slots) = x.slot_structures[Type{AnalyticOperator}].indices
+
+F3 = operator(
+	TensorDisplay("F","\\textrm{analytic}",""), 
+	Slots{2}(AnalyticOperator([1,2]))
+)
+
+G1 = operator(
+	TensorDisplay("F","\\textrm{expansion}","[0,1]"),
+	Slots{1}(Multilinear([1]))
+)
+G2 = operator(
+	TensorDisplay("F","\\textrm{expansion}","[1,0]"),
+	Slots{1}(Multilinear([1]))
+)
+G3 = operator(
+	TensorDisplay("F","\\textrm{expansion}","[1,1]"),
+	Slots{2}(Multilinear([1,2]), TotalSymmetry([[1,2]]))
+)
+
+aav = G1(g0+ϵ*g1) + G2(g0+ϵ*g1) + G3(g0+ϵ*g1,g0+ϵ*g1) |> expand_linear(Multilinear) |> canonicalize |> simplify
+
+ 
+end
+
+# ╔═╡ 4d404e8b-a05e-4ec5-a695-d61f0f5529e9
+arguments(aav)[1] |> canonicalize
 
 # ╔═╡ a3a23c75-b53f-4435-b9b5-0ffe3c6ea706
 is_scalar(g1,Multilinear)
@@ -412,6 +452,7 @@ The methods that help use these simplifications are:
 |-------------|--------------|
 |`Multilinear`|`expand_linear`|
 |`Symmetric`|`canonicalize`|
+|`AnalyticOperator`| `expand_analytic`|
 
 > How does one `expand_linear`?
 >
@@ -1301,6 +1342,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═9b991e37-3edd-4c2b-8409-b28da7ccb326
 # ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
 # ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
+# ╠═4d404e8b-a05e-4ec5-a695-d61f0f5529e9
 # ╠═2e4aeb4f-eea0-476f-94cf-919237899dd2
 # ╠═0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
 # ╠═2fcb430c-96df-4480-9db2-5ef6ec630e98
