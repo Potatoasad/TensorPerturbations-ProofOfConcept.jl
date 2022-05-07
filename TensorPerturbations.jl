@@ -34,6 +34,12 @@ struct TensorDisplay{T <: AbstractString} <: AbstractTensorDisplay
 end
 
 TensorDisplay(name::AbstractString; sub="", super="") = TensorDisplay(name,sub,super)
+append_sub(x::TensorDisplay,a::AbstractString) = TensorDisplay(x.name,x.sub*a,x.sup)
+append_sub(a::AbstractString) = (x -> append_sub(x,a))
+append_sup(x::TensorDisplay,a::AbstractString) = TensorDisplay(x.name,x.sub,x.sup*a)
+append_sup(a::AbstractString) = (x -> append_sup(x,a))
+append_name(x::TensorDisplay,a::AbstractString) = TensorDisplay(x.name*a,x.sub,x.sup)
+append_name(a::AbstractString) = (x -> append_name(x,a))
 
 """
 Function to extract the latex representation of the TensorDisplay as a string. 
@@ -101,7 +107,8 @@ struct Slots{N}
 	slot_structures::Dict{DataType, AbstractSlotStructure}
 end
 Slots{N}(x::AbstractSlotStructure...) where {N} = Slots{N}(Dict([Type{typeof(x1)} => x1 for x1 in x]))
-	
+merge_together(x::Slots{N}, y::Slots{M}) where {N,M} = Slots{M}(merge(x.slot_structures,y.slot_structures))
+
 slot_structure(x::Slots) = x.slot_structures
 	
 is_multilinear(x::Slots) = Type{Multilinear} ∈ keys(x.slot_structures)
@@ -140,7 +147,7 @@ variable(s::Union{AbstractString,TensorDisplay}, x::Pair{DataType, S}) where {K,
 operator(s::TensorDisplay, K::Slots{N}) where {N} = setmetadata(setmetadata(Sym{FnType{NTuple{N,Number},NewTensor}}(Symbol(str(s))), Type{TensorDisplay}, s),Type{Slots},K)
 operator(s::TensorDisplay, K::Slots, x::Pair{DataType, S}) where {S} = setmetadata(operator(s),x.first, x.second)
 
-function operator(s::TensorDisplay, sl::Slots, x::Dict{DataType,S}) where {S}
+function operator(s::TensorDisplay, sl::Slots, x::Union{Dict{DataType,S},Base.ImmutableDict{DataType,S}}) where {S}
 	op = operator(s,sl)
 	for (t,p) ∈ x
 		op = setmetadata(op, t, p)
@@ -345,11 +352,14 @@ F(ϵ*x + η*y,y) |> expand_linear(Multilinear)
 # ╔═╡ 9b991e37-3edd-4c2b-8409-b28da7ccb326
 F(ϵ*x + η*y,y) |> (x -> is_multilinear(x))
 
-# ╔═╡ 2e4aeb4f-eea0-476f-94cf-919237899dd2
+# ╔═╡ 3b557bcb-ff3f-4f4e-ac44-f54043a59b9f
 
+
+# ╔═╡ db185faa-686b-41d7-8859-1595551706a0
+merge(F.metadata, Base.ImmutableDict(Type{Slots} => Slots{3}(TotalSymmetry([[1,2,3]]))))
 
 # ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
-ll[(0,1)]
+
 
 # ╔═╡ 2fcb430c-96df-4480-9db2-5ef6ec630e98
 g0 = variable("g_0",Dict([Type{NotScalar{Multilinear}} => true]))
@@ -367,8 +377,8 @@ struct AnalyticOperator <: AbstractAnalyticOperator
 	indices::Vector{Int64}
 end
 
-is_analytic(x::Slots) = Type{Multilinear} ∈ keys(x.slot_structures)
-is_analytic(x::Term{NewTensor}) = is_multilinear(Slots(x))
+is_analytic(x::Slots) = Type{AnalyticOperator} ∈ keys(x.slot_structures)
+is_analytic(x::Term{NewTensor}) = is_analytic(Slots(x))
 analytic_indices(x::Slots) = x.slot_structures[Type{AnalyticOperator}].indices
 
 F3 = operator(
@@ -389,13 +399,78 @@ G3 = operator(
 	Slots{2}(Multilinear([1,2]), TotalSymmetry([[1,2]]))
 )
 
-aav = G1(g0+ϵ*g1) + G2(g0+ϵ*g1) + G3(g0+ϵ*g1,g0+ϵ*g1) |> expand_linear(Multilinear) |> canonicalize |> simplify
+is_an_Add(x::Add) = true
+is_an_Add(x) = false
+function should_expand_analytic(x::Term{NewTensor})
+	if !is_analytic(x)
+		return false
+	end
+	any(is_an_Add.(arguments(x)))
+end
+
+fixed_order_term(a::Vector,b::Union{Vector{Int},Tuple}) = Iterators.flatten([collect(repeat([a[i]],b[i])) for i ∈ 1:length(b)]) |> collect
+
+function all_combs(target_order, n_slots)
+	a = Iterators.product(repeat([0:target_order],n_slots)...) |> collect
+	[i for i ∈ vcat(a...) if sum(i) ≤ target_order]
+end
+
+function make_expanded_term_like(old::Term{NewTensor}, order::Vector{Int}; Linearity=Multilinear, Symmetry=TotalSymmetry)
+	F = operation(old)
+	display = TensorDisplay(old)
+	new_display = append_sup(display, "$(order)")
+	args = arguments(old)
+	old_slot_struct = Slots(old)
+	new_slot_number = sum(order)
+	NewSlotStructureNeeded = Slots{new_slot_number}(
+		Multilinear(collect(1:new_slot_number)),
+		TotalSymmetry([collect(1:order[1]),collect(order[1] .+ 1:order[2])])
+	)
+	NewSlotStructureNeeded = merge_together(old_slot_struct, NewSlotStructureNeeded)
+	new_metadata = Base.ImmutableDict(Type{Slots} => NewSlotStructureNeeded)
+	new_metadata = merge(F.metadata, new_metadata)
+	F_new = operator(new_display, NewSlotStructureNeeded, new_metadata)
+	F_new(fixed_order_term(args,order)...)
+end
+
+function analytic_expand_term(x::Term{NewTensor}, order::Int)
+	
+	N_slots = number_of_slots(x)
+	args = arguments(x)
+end
+
+	
+aav = G1(g0+ϵ*g1) + G2(g0+ϵ*g1) + G3(g0+ϵ*g1,g0+ϵ*g1) |> expand_linear(Multilinear) |> canonicalize |> simplify |> seperate_orders(Ξ)
 
  
 end
 
+# ╔═╡ 59e3c9f9-1035-4d79-8f0b-3b91ba11b6ae
+begin
+
+make_expanded_term_like(F3(x,x+y),[1,3]) |> expand_linear(Multilinear) |> canonicalize |> simplify
+end
+
+# ╔═╡ b52da822-984d-4fc5-9cb0-615b50a441e6
+operation(make_expanded_term_like(F3(x,x+y),[1,3])).metadata
+
+# ╔═╡ 62738094-aee0-4be1-8b7a-e6076e6622bd
+begin
+testlist = [x,y]
+
+#fixed_order_term(a::Vector,b::Union{Tuple,Vector{Int}}) = Iterators.flatten([collect(repeat([a[i]],b[i])) for i ∈ 1:length(b)]) |> collect
+	
+fixed_order_term(testlist,[2,1])
+end
+
+# ╔═╡ 7808d878-b846-4bd2-9d0f-f423ed8faaf3
+[(comb,fixed_order_term(testlist, comb)) for comb in all_combs(5,2)]
+
 # ╔═╡ 4d404e8b-a05e-4ec5-a695-d61f0f5529e9
-arguments(aav)[1] |> canonicalize
+F3(x,y) |> TensorDisplay
+
+# ╔═╡ 2e4aeb4f-eea0-476f-94cf-919237899dd2
+number_of_slots(F3(x,y))
 
 # ╔═╡ a3a23c75-b53f-4435-b9b5-0ffe3c6ea706
 is_scalar(g1,Multilinear)
@@ -1342,6 +1417,12 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═9b991e37-3edd-4c2b-8409-b28da7ccb326
 # ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
 # ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
+# ╠═59e3c9f9-1035-4d79-8f0b-3b91ba11b6ae
+# ╠═3b557bcb-ff3f-4f4e-ac44-f54043a59b9f
+# ╠═b52da822-984d-4fc5-9cb0-615b50a441e6
+# ╠═7808d878-b846-4bd2-9d0f-f423ed8faaf3
+# ╠═db185faa-686b-41d7-8859-1595551706a0
+# ╠═62738094-aee0-4be1-8b7a-e6076e6622bd
 # ╠═4d404e8b-a05e-4ec5-a695-d61f0f5529e9
 # ╠═2e4aeb4f-eea0-476f-94cf-919237899dd2
 # ╠═0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
