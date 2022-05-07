@@ -234,11 +234,15 @@ param(s::Type{K}) where {K <: MultilinearSlotStructure} = K
 is_scalar(x, s::Type{<:MultilinearSlotStructure}) = true
 is_scalar(x::Number, s::Type{<:MultilinearSlotStructure}) = true
 is_scalar(x::Sym, s::Type{<:MultilinearSlotStructure}) = !hasmetadata(x, Type{NotScalar{param(s)}})
+
+argument_should_expand(x::Number, s::Type{<:MultilinearSlotStructure}) = (x == one(x)) ? false : true
 argument_should_expand(x::Sym, s::Type{<:MultilinearSlotStructure}) = false
 argument_should_expand(x::Add, s::Type{<:MultilinearSlotStructure}) = true
 argument_should_expand(x::Mul, s::Type{<:MultilinearSlotStructure}) = any((x -> is_scalar(x,s)).(arguments(x)))
+argument_should_expand(s::Type{<:MultilinearSlotStructure}) = (x -> argument_should_expand(x,s))
 
-#seperate_scalars(x::Mul, s::Type{<:MultilinearSlotStructure}) = [arguments(x)]
+should_expand(x,s::Type{<:MultilinearSlotStructure}) = false
+should_expand(x::Term{NewTensor},s::Type{<:MultilinearSlotStructure}) = is_multilinear(x) && any(argument_should_expand(s).(arguments(x)))
 
 function expand_additions(x,s::Type{<:MultilinearSlotStructure})
 	is_scalar(x,s) ? (x,1) : (1,x)
@@ -261,17 +265,29 @@ make_list_if_not(x::Vector) = x
 expand_additions(x::Add, s::Type{<:MultilinearSlotStructure}) = (x -> expand_additions(x,s)).(arguments(x))
 expand_additions(s::Type{<:MultilinearSlotStructure}) = (x -> expand_additions(x,s))
 
-function expand_linear(x::Term{NewTensor}, s::Type{<:MultilinearSlotStructure})
+function expand_linear_term(x::Term{NewTensor}, s::Type{<:MultilinearSlotStructure})
 	F = operation(x)
 	arg_tuples = expand_additions(s).(expand.(arguments(x)))
-	#arg_tuples = make_list_if_not.(expand_additions(s).(expand.(arguments(x))))
-	#newstuff = Iterators.product(arg_tuples...) |> collect |> vec
-	#sum([prod([p[1] for p ∈ a])*F([p[2] for p ∈ a]...) for a ∈ newstuff])
+	arg_tuples = make_list_if_not.(expand_additions(s).(expand.(arguments(x))))
+	newstuff = Iterators.product(arg_tuples...) |> collect |> vec
+	sum([prod([p[1] for p ∈ a])*F([p[2] for p ∈ a]...) for a ∈ newstuff])
 end
-expand_linear(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear(x,s))
+expand_linear_term(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear_term(x,s))
 	
 md"> Adding Linearity"
 end
+
+# ╔═╡ 911c624b-80cb-467e-a097-179650111802
+begin
+r2(s::Type{<:MultilinearSlotStructure}) = @rule ~x::(z -> should_expand(z,s)) => expand_linear_term(x,s)
+
+expand_linear(x,s::Type{<:MultilinearSlotStructure}) = simplify(x,Prewalk(PassThrough(r2(s))))
+
+expand_linear(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear(x,s))
+end
+
+# ╔═╡ 0e668e2b-5dd9-4c24-8ceb-e8c62aa3e88c
+
 
 # ╔═╡ 223ae6fa-bbae-42ba-a4ea-6dc2814aa521
 begin
@@ -306,37 +322,52 @@ filter(x::Add, ps::Vector{DataType}, i_vec::Vector{<:Integer}) where {T <: Pertu
 function seperate_orders(x::Union{Add,Mul,Pow}, ps::Union{APT,Vector{DataType},DataType}) 
 	new = expand(x)
 	thedicts = [Dict([Tuple(pert(a,ps)) => a]) for a ∈ arguments(new)]
-	#final_dict = merge(operation(x), thedicts...)
-	#final_dict
+	final_dict = merge(operation(x), thedicts...)
+	final_dict
 end
 seperate_orders(ps::Union{APT,Vector{DataType},DataType}) = (x->seperate_orders(x,ps))
 
-
-struct Background <: PerturbationOrder end
-struct Wave <: PerturbationOrder end
 ϵ = variable("\\epsilon", Type{:Background} => 1)
-η = variable("\\eta", Type{:Wavew} => 1)
-Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wavew} => η]))
+η = variable("\\eta", Type{:Wave} => 1)
+Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wave} => η]))
 	
 md"> Adding Perturbations"
 
 aa = F(ϵ*x + η*y,y)
-#aa = expand_linear(aa,Multilinear)
-#check = (arguments(aa)[1] |> arguments)[1] 
-#(check.metadata |> keys |> collect)[1]
 end
 
+# ╔═╡ 329a0fda-a403-4fbf-af01-019ea7e6f7f0
+F(ϵ*x + η*y,y) |> expand_linear(Multilinear)
+
+# ╔═╡ 9b991e37-3edd-4c2b-8409-b28da7ccb326
+F(ϵ*x + η*y,y) |> (x -> is_multilinear(x))
+
+# ╔═╡ 6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
+
+
 # ╔═╡ 2e4aeb4f-eea0-476f-94cf-919237899dd2
-Type{:Background}
+ll = aa |> expand_linear(Multilinear) |> seperate_orders(Ξ)
 
 # ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
-(arguments(aa[1][2][1])[1].metadata |> keys |> collect)[1]
+ll[(0,1)]
 
 # ╔═╡ 2fcb430c-96df-4480-9db2-5ef6ec630e98
-(x -> arguments(arguments(x[1])[2])[1].metadata)(arguments(aa))
+g0 = variable("g_0",Dict([Type{NotScalar{Multilinear}} => true]))
+
+# ╔═╡ 60d81965-801c-479b-951c-5742a1ed86aa
+g1 = variable("g_1",Dict([Type{NotScalar{Multilinear}} => true]))
+
+# ╔═╡ a3a23c75-b53f-4435-b9b5-0ffe3c6ea706
+is_scalar(g1,Multilinear)
+
+# ╔═╡ e2d859a9-9f82-458f-8592-6a41fc21cb59
+F(ϵ*g1 + η*g0,g1 + g0) |> expand_linear(Multilinear) |> canonicalize |> simplify
+
+# ╔═╡ 067c5e3f-a288-4163-9c51-acc7a69ae419
+expand_additions(g0*x,Multilinear)
 
 # ╔═╡ 0f5bf7ee-c19c-4cf8-bb29-a49b051432bb
-((expand.(arguments(aa)))[1] |> (x -> arguments(arguments(x)[2])[1])).metadata
+#((expand.(arguments(aa)))[1] |> (x -> arguments(arguments(x)[2])[1])).metadata
 
 # ╔═╡ 92d2b55b-42a7-4486-871d-cb688e0149c5
 (arguments(arguments(aa[1])[2])[1].metadata |> keys |> collect)
@@ -1264,10 +1295,19 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═9fb6152d-a58e-4503-b237-6d5470e65f43
 # ╠═f4a240c6-bb13-4422-bc9f-5bf555338f10
 # ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
+# ╠═911c624b-80cb-467e-a097-179650111802
+# ╠═329a0fda-a403-4fbf-af01-019ea7e6f7f0
+# ╠═0e668e2b-5dd9-4c24-8ceb-e8c62aa3e88c
+# ╠═9b991e37-3edd-4c2b-8409-b28da7ccb326
 # ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
+# ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
 # ╠═2e4aeb4f-eea0-476f-94cf-919237899dd2
 # ╠═0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
 # ╠═2fcb430c-96df-4480-9db2-5ef6ec630e98
+# ╠═60d81965-801c-479b-951c-5742a1ed86aa
+# ╠═a3a23c75-b53f-4435-b9b5-0ffe3c6ea706
+# ╠═e2d859a9-9f82-458f-8592-6a41fc21cb59
+# ╠═067c5e3f-a288-4163-9c51-acc7a69ae419
 # ╠═0f5bf7ee-c19c-4cf8-bb29-a49b051432bb
 # ╠═92d2b55b-42a7-4486-871d-cb688e0149c5
 # ╠═5d29f5a5-ab4b-46a1-a088-834003926034
