@@ -83,10 +83,17 @@ abstract type AbstractSlot end
 struct Slot <: AbstractSlot end
 
 abstract type AbstractSlotStructure end
-struct MultilinearStructure <: AbstractSlotStructure
+
+abstract type MultilinearSlotStructure <: AbstractSlotStructure end
+abstract type SymmetrySlotStructure <: AbstractSlotStructure end
+
+struct Multilinear <: MultilinearSlotStructure
 	indices::Vector{Int64}
 end
-struct SymmetryStructure <: AbstractSlotStructure
+
+struct NotScalar{T <: MultilinearSlotStructure} end 
+	
+struct TotalSymmetry <: SymmetrySlotStructure
 	indices::Vector{Vector{Int64}}
 end
 	
@@ -97,13 +104,13 @@ Slots{N}(x::AbstractSlotStructure...) where {N} = Slots{N}(Dict([Type{typeof(x1)
 	
 slot_structure(x::Slots) = x.slot_structures
 	
-is_multilinear(x::Slots) = Type{MultilinearStructure} ∈ keys(x.slot_structures)
+is_multilinear(x::Slots) = Type{Multilinear} ∈ keys(x.slot_structures)
 is_multilinear(x::Term{NewTensor}) = is_multilinear(Slots(x))
-is_symmetric(x::Slots) = Type{SymmetryStructure} ∈ keys(x.slot_structures)
+is_symmetric(x::Slots) = Type{TotalSymmetry} ∈ keys(x.slot_structures)
 is_symmetric(x::Term{NewTensor}) = is_multilinear(Slots(x))
 	
-multilinear_indices(x::Slots) = x.slot_structures[Type{MultilinearStructure}].indices
-symmetric_indices(x::Slots) = x.slot_structures[Type{SymmetryStructure}].indices
+multilinear_indices(x::Slots) = x.slot_structures[Type{Multilinear}].indices
+symmetric_indices(x::Slots) = x.slot_structures[Type{TotalSymmetry}].indices
 	
 is_fully_multilinear(x::Slots{N}) where {N} = is_multilinear(x) && (Set(multilinear_indices(x)) == Set(1:N))
 is_fully_multilinear(x::Term{NewTensor}) = is_fully_multilinear(Slots(x))
@@ -114,50 +121,6 @@ number_of_slots(x::Slots{N}) where {N} = N
 number_of_slots(x::Term{NewTensor}) = number_of_slots(Slots(x))
 	
 md"> Created a new Slot type"
-end
-
-# ╔═╡ 1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
-begin
-function partial_reorder(main_list::Vector, symmetry::Vector; by=identity)
-	reorder = symmetry[sortperm(main_list[symmetry]; by=by)]
-	result = collect(1:length(main_list))
-	result2 = 1:length(main_list)
-	for i ∈ 1:length(symmetry)
-		if symmetry[i] != reorder[i]
-			result[symmetry[i]] = result2[reorder[i]]
-		end
-	end
-	main_list[result]
-end
-
-function partial_reorder(main_list::Vector, symmetry_list::Vector{Vector{T}}; by=identity) where {T}
-	p = main_list
-	for symmetry in symmetry_list
-		p = partial_reorder(p, symmetry; by=by)
-	end
-	p
-end
-
-
-already_partially_ordered(x; by=hash) = true
-function already_partially_ordered(x::Term{NewTensor}; by=hash)
-	args = arguments(x)
-	sym_inds = symmetric_indices(Slots(x))
-	ordered_args = sort(args; by=hash)
-	for i in 1:length(args)
-		if by(args[i]) != by(ordered_args[i])
-			return false
-		end
-	end
-	return true
-end
-
-canonicalize_term(x; by=hash) = x
-function canonicalize_term(x::Term{NewTensor}; by=hash)
-	args = partial_reorder(arguments(x),symmetric_indices(Slots(x));by=by)
-	similarterm(x,operation(x),args)
-end
-md"> Symmetry canonicalizations"
 end
 
 # ╔═╡ 004ab9ee-4562-421a-ad7c-eaa91c8f96db
@@ -199,21 +162,66 @@ end
 
 # ╔═╡ c193c17d-8eb1-4570-b97a-21e9416f0e08
 begin
-TheSlots = Slots{2}(SymmetryStructure([[1,2]]),MultilinearStructure([1,2]))
+TheSlots = Slots{2}(TotalSymmetry([[1,2]]),Multilinear([1,2]))
 F = operator(TensorDisplay("\\mathcal{F}","\\textrm{int}","AB"),TheSlots)
 @syms x y
 F(x,y)
 end
 
-# ╔═╡ 9fb6152d-a58e-4503-b237-6d5470e65f43
+# ╔═╡ 1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
 begin
 import SymbolicUtils: Postwalk, Fixpoint, Prewalk, PassThrough
+
+function partial_reorder(main_list::Vector, symmetry::Vector; by=identity)
+	reorder = symmetry[sortperm(main_list[symmetry]; by=by)]
+	result = collect(1:length(main_list))
+	result2 = 1:length(main_list)
+	for i ∈ 1:length(symmetry)
+		if symmetry[i] != reorder[i]
+			result[symmetry[i]] = result2[reorder[i]]
+		end
+	end
+	main_list[result]
+end
+
+function partial_reorder(main_list::Vector, symmetry_list::Vector{Vector{T}}; by=identity) where {T}
+	p = main_list
+	for symmetry in symmetry_list
+		p = partial_reorder(p, symmetry; by=by)
+	end
+	p
+end
+
+
+already_partially_ordered(x; by=hash) = true
+function already_partially_ordered(x::Term{NewTensor}; by=hash)
+	args = arguments(x)
+	sym_inds = symmetric_indices(Slots(x))
+	ordered_args = sort(args; by=hash)
+	for i in 1:length(args)
+		if by(args[i]) != by(ordered_args[i])
+			return false
+		end
+	end
+	return true
+end
+
+canonicalize_term(x; by=hash) = x
+function canonicalize_term(x::Term{NewTensor}; by=hash)
+	args = partial_reorder(arguments(x),symmetric_indices(Slots(x));by=by)
+	similarterm(x,operation(x),args)
+end
 
 r = @rule ~x::(z -> !already_partially_ordered(z)) => canonicalize_term(x)
 canonicalize(x) = simplify(x, Prewalk(PassThrough(r)))
 
 
-F(x,y) + F(y,x) |> canonicalize
+md"> Symmetry canonicalizations"
+end
+
+# ╔═╡ 9fb6152d-a58e-4503-b237-6d5470e65f43
+begin
+F(x,y) + F(y,x) + F(x,y^2) |> canonicalize
 end
 
 # ╔═╡ f4a240c6-bb13-4422-bc9f-5bf555338f10
@@ -221,29 +229,113 @@ Slots(F(x,y))
 
 # ╔═╡ 893d798e-7376-43bc-99b1-2e65f45f1c18
 begin
-sort_term(x) = x
-sort_term(x::Add) = similar_term()
-candidate_term(x, ::Type{<:AbstractSlotStructure}) = false
-function candidate_term(x::Term{NewTensor}, t::Type{SymmetryStructure})
-	inds = slot_structure(operation(x))[t].indicies
-	args = arguments(x)
-	N_slots = number_of_slots(x)
-	#sym_args = sort([args[i] for i ∈ inds], by=hash)
-	issorted([args[i] for i ∈ inds], by=hash)
-	#new_args = [i ? sym_args[findfirst(x -> x==i, inds)] for i ∈ 1:N_slots]
-	#similarterm(x, operation(x),new_args)
+param(s::Type{K}) where {K <: MultilinearSlotStructure} = K 
+	
+is_scalar(x, s::Type{<:MultilinearSlotStructure}) = true
+is_scalar(x::Number, s::Type{<:MultilinearSlotStructure}) = true
+is_scalar(x::Sym, s::Type{<:MultilinearSlotStructure}) = !hasmetadata(x, Type{NotScalar{param(s)}})
+argument_should_expand(x::Sym, s::Type{<:MultilinearSlotStructure}) = false
+argument_should_expand(x::Add, s::Type{<:MultilinearSlotStructure}) = true
+argument_should_expand(x::Mul, s::Type{<:MultilinearSlotStructure}) = any((x -> is_scalar(x,s)).(arguments(x)))
+
+seperate_scalars(x::Mul, s::Type{<:MultilinearSlotStructure}) = [arguments(x)]
+
+function expand_additions(x,s::Type{<:MultilinearSlotStructure})
+	is_scalar(x,s) ? (x,1) : (1,x)
 end
-function sort_term(x::Term{NewTensor}, t::Type{SymmetryStructure})
-	inds = slot_structure(operation(x))[t].indicies
-	args = arguments(x)
-	N_slots = number_of_slots(x)
-	sym_args = sort([args[i] for i ∈ inds], by=hash)
-	#issorted([args[i] for i ∈ inds], by=hash)
-	new_args = [i ? sym_args[findfirst(x -> x==i, inds)] : args[i] for i ∈ 1:N_slots]
-	similarterm(x, operation(x), new_args)
+function expand_additions(x::Mul, s::Type{<:MultilinearSlotStructure})
+	scalars = []; non_scalars = [];
+	for arg in arguments(x)
+		is_scalar(arg,s) ? push!(scalars, arg) : push!(non_scalars,arg)
+	end
+	if length(scalars) == 0
+		scalars = [1]
+	end
+	if length(non_scalars) == 0
+		non_scalars = [1]
+	end
+	Tuple([*(scalars...),*(non_scalars...)])
+end
+make_list_if_not(x) = [x]
+make_list_if_not(x::Vector) = x
+expand_additions(x::Add, s::Type{<:MultilinearSlotStructure}) = (x -> expand_additions(x,s)).(arguments(x))
+expand_additions(s::Type{<:MultilinearSlotStructure}) = (x -> expand_additions(x,s))
+
+function expand_linear(x::Term{NewTensor}, s::Type{<:MultilinearSlotStructure})
+	F = operation(x)
+	arg_tuples = make_list_if_not.(expand_additions(s).(expand.(arguments(x))))
+	newstuff = Iterators.product(arg_tuples...) |> collect |> vec
+	sum([prod([s[1] for s ∈ a])*F([s[2] for s ∈ a]...) for a ∈ newstuff])
+end
+expand_linear(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear(x,s))
+	
+md"> Adding Linearity"
 end
 
-md"> Did slot sorting"
+# ╔═╡ 223ae6fa-bbae-42ba-a4ea-6dc2814aa521
+begin
+
+abstract type PerturbationOrder end
+
+abstract type AbstractPerturbationParameters{T} end
+
+const APT{T} = AbstractPerturbationParameters{T} where {T}
+
+struct PerturbationParameters{T} <: AbstractPerturbationParameters{T}
+	type_list::Vector{DataType}
+	params::Vector{T}
+end
+
+PerturbationParameters(x::Dict{DataType, T}) where {T} = PerturbationParameters(collect(keys(x)),collect(values(x)))
+
+
+pert(x, p::DataType)::Integer = 0
+pert(x::Sym, p::DataType)::Integer = hasmetadata(x, p) ? getmetadata(x, p) : 0
+pert(x::Mul, p::DataType)::Integer = sum(pert(a, p) for a ∈ arguments(x))
+pert(x::Pow, p::DataType)::Integer = pert(x.base, p)*x.exp
+pert(x, ps::Vector{DataType}) = [pert(x, p) for p ∈ ps]
+pert(x, Ξ::APT) = [pert(x, p) for p ∈ Ξ.type_list]
+pert(Ξ::APT) = (x -> pert(x,Ξ))
+pert(x, pss::Vector{Sym}) = pert(x, [collect(keys(p.metadata)) for p in pss])
+
+filter(x::Add, p::DataType, i::Integer) = similarterm(x, operation(x), [a for a in arguments(x) if pert(a,p) == i])
+
+filter(x::Add, ps::Vector{DataType}, i_vec::Vector{<:Integer}) where {T <: PerturbationOrder} = similarterm(x, operation(x), [a for a in arguments(x) if all((pert(a,p) == i) for (i,p) ∈ zip(i_vec, ps))])
+
+function seperate_orders(x::Union{Add,Mul,Pow}, ps::Union{APT,Vector{DataType},DataType}) 
+	new = expand(x)
+	thedicts = [Dict([Tuple(pert(a,ps)) => a]) for a ∈ arguments(new)]
+	final_dict = merge(operation(x), thedicts...)
+	final_dict
+end
+
+
+struct Background <: PerturbationOrder end
+struct Wave <: PerturbationOrder end
+ϵ = variable("\\epsilon", Background => 1)
+η = variable("\\eta", Wave => 1)
+Ξ = PerturbationParameters(Dict([Background => ϵ, Wave => η]))
+	
+md"> Adding Perturbations"
+end
+
+# ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
+F(ϵ*x + η*y,y)|> expand_linear(Multilinear)
+
+# ╔═╡ fd777d6a-2f12-4cf4-b390-f43ad70e3ea6
+collect(keys(ϵ.metadata))[1] isa PerturbationOrder
+
+# ╔═╡ a62433a3-d4a1-4ab1-bbf7-837701f9fb68
+is_scalar(y,Multilinear)
+
+# ╔═╡ 53e01eba-125c-4a20-b156-46ae2352d69a
+argument_should_expand(arguments(F(2*x,y+4))[2], Multilinear)
+
+# ╔═╡ 921085c6-a61b-4f1b-be73-65c38d00e26d
+begin
+	stuff = F(2*x,y+4) |> expand_linear(Multilinear)
+	newstuff = Iterators.product(stuff...) |> collect |> vec
+	sum([prod([s[1] for s ∈ a])*F([s[2] for s ∈ a]...) for a ∈ newstuff])
 end
 
 # ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
@@ -1135,12 +1227,18 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
 # ╠═977b2170-886d-40d8-ada2-29385c8c8bde
 # ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
-# ╠═1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
-# ╠═9fb6152d-a58e-4503-b237-6d5470e65f43
 # ╠═004ab9ee-4562-421a-ad7c-eaa91c8f96db
 # ╠═c193c17d-8eb1-4570-b97a-21e9416f0e08
+# ╠═1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
+# ╠═9fb6152d-a58e-4503-b237-6d5470e65f43
 # ╠═f4a240c6-bb13-4422-bc9f-5bf555338f10
 # ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
+# ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
+# ╠═0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
+# ╠═fd777d6a-2f12-4cf4-b390-f43ad70e3ea6
+# ╠═a62433a3-d4a1-4ab1-bbf7-837701f9fb68
+# ╠═53e01eba-125c-4a20-b156-46ae2352d69a
+# ╠═921085c6-a61b-4f1b-be73-65c38d00e26d
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
 # ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
