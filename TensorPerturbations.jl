@@ -108,6 +108,7 @@ struct Slots{N}
 end
 Slots{N}(x::AbstractSlotStructure...) where {N} = Slots{N}(Dict([Type{typeof(x1)} => x1 for x1 in x]))
 merge_together(x::Slots{N}, y::Slots{M}) where {N,M} = Slots{M}(merge(x.slot_structures,y.slot_structures))
+remove_structure!(x::Slots, v::DataType) = delete!(x.slot_structures, v)
 
 slot_structure(x::Slots) = x.slot_structures
 	
@@ -164,15 +165,7 @@ function _toexpr(x::Term{NewTensor})
 end
 
 
-md"> Created a custom function to create a new variable with metadata and a new operator variable with a particular display and number of slots"
-end
-
-# ╔═╡ c193c17d-8eb1-4570-b97a-21e9416f0e08
-begin
-TheSlots = Slots{2}(TotalSymmetry([[1,2]]),Multilinear([1,2]))
-F = operator(TensorDisplay("\\mathcal{F}","\\textrm{int}","AB"),TheSlots)
-@syms x y
-F(x,y)
+md"> Functions to create new variables and operators"
 end
 
 # ╔═╡ 1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
@@ -229,14 +222,6 @@ canonicalize(x) = simplify(x, Prewalk(PassThrough(r)))
 md"> Symmetry canonicalizations"
 end
 
-# ╔═╡ 9fb6152d-a58e-4503-b237-6d5470e65f43
-begin
-F(x,y) + F(y,x) + F(x,y^2) |> canonicalize
-end
-
-# ╔═╡ f4a240c6-bb13-4422-bc9f-5bf555338f10
-Slots(F(x,y))
-
 # ╔═╡ 893d798e-7376-43bc-99b1-2e65f45f1c18
 begin
 param(s::Type{K}) where {K <: MultilinearSlotStructure} = K 
@@ -246,7 +231,7 @@ is_scalar(x::Number, s::Type{<:MultilinearSlotStructure}) = true
 is_scalar(x::Sym, s::Type{<:MultilinearSlotStructure}) = !hasmetadata(x, Type{NotScalar{param(s)}})
 
 argument_should_expand(x::Number, s::Type{<:MultilinearSlotStructure}) = (x == one(x)) ? false : true
-argument_should_expand(x::Sym, s::Type{<:MultilinearSlotStructure}) = false
+argument_should_expand(x::Sym, s::Type{<:MultilinearSlotStructure}) = true
 argument_should_expand(x::Add, s::Type{<:MultilinearSlotStructure}) = true
 argument_should_expand(x::Mul, s::Type{<:MultilinearSlotStructure}) = any((x -> is_scalar(x,s)).(arguments(x)))
 argument_should_expand(s::Type{<:MultilinearSlotStructure}) = (x -> argument_should_expand(x,s))
@@ -283,21 +268,15 @@ function expand_linear_term(x::Term{NewTensor}, s::Type{<:MultilinearSlotStructu
 	sum([prod([p[1] for p ∈ a])*F([p[2] for p ∈ a]...) for a ∈ newstuff])
 end
 expand_linear_term(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear_term(x,s))
-	
-md"> Adding Linearity"
-end
 
-# ╔═╡ 911c624b-80cb-467e-a097-179650111802
-begin
 r2(s::Type{<:MultilinearSlotStructure}) = @rule ~x::(z -> should_expand(z,s)) => expand_linear_term(x,s)
 
 expand_linear(x,s::Type{<:MultilinearSlotStructure}) = simplify(x,Prewalk(PassThrough(r2(s))))
 
 expand_linear(s::Type{<:MultilinearSlotStructure}) = (x -> expand_linear(x,s))
+	
+md"> Adding Linearity"
 end
-
-# ╔═╡ 0e668e2b-5dd9-4c24-8ceb-e8c62aa3e88c
-
 
 # ╔═╡ 223ae6fa-bbae-42ba-a4ea-6dc2814aa521
 begin
@@ -329,43 +308,63 @@ filter(x::Add, p::DataType, i::Integer) = similarterm(x, operation(x), [a for a 
 
 filter(x::Add, ps::Vector{DataType}, i_vec::Vector{<:Integer}) where {T <: PerturbationOrder} = similarterm(x, operation(x), [a for a in arguments(x) if all((pert(a,p) == i) for (i,p) ∈ zip(i_vec, ps))])
 
-function seperate_orders(x::Union{Add,Mul,Pow}, ps::Union{APT,Vector{DataType},DataType}) 
+pert_like(x::Union{Tuple,Vector},Ξ::APT) = prod((Ξ.params[i]^x[i] for i ∈ 1:length(Ξ.params)))
+
+divide_if_Add(x::Add, divisor) = similarterm(x,operation(x),arguments(x).//divisor)
+divide_if_Add(x, divisor) = x//divisor
+
+#arguments_general(x::Union{Add,Mul,Pow}) = arguments(x)
+#arguments_general(x::Sym) = [x]
+seperate_orders(x::Sym,ps::Union{APT,Vector{DataType},DataType}) = Dict([Tuple(pert(x,ps)) => x])
+function seperate_orders(x::Union{Add,Mul,Pow}, ps::Union{APT,Vector{DataType},DataType}; divide=false) 
 	new = expand(x)
-	thedicts = [Dict([Tuple(pert(a,ps)) => a]) for a ∈ arguments(new)]
+	# Need a general dictionary that can hold lots of different types
+	if divide
+		thedicts = [Dict{Tuple{Number,Number},Union{Add,Mul,Pow,Sym,Term}}([Tuple(pert(a,ps)) => divide_if_Add(a,pert_like(pert(a,ps),ps))]) for a ∈ arguments(new)]
+	else
+		thedicts = [Dict{Tuple{Number,Number},Union{Add,Mul,Pow,Sym,Term}}([Tuple(pert(a,ps)) => a]) for a ∈ arguments(new)]
+	end
 	final_dict = merge(operation(x), thedicts...)
 	final_dict
 end
-seperate_orders(ps::Union{APT,Vector{DataType},DataType}) = (x->seperate_orders(x,ps))
+seperate_orders(ps::Union{APT,Vector{DataType},DataType}; divide=false) = (x->seperate_orders(x,ps;divide=divide))
 
-ϵ = variable("\\epsilon", Type{:Background} => 1)
-η = variable("\\eta", Type{:Wave} => 1)
-Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wave} => η]))
+
+function seperate_all_orders(x::Union{Add,Mul,Pow}, ps::Union{APT,Vector{DataType},DataType})
+	
+end
 	
 md"> Adding Perturbations"
-
-aa = F(ϵ*x + η*y,y)
 end
 
-# ╔═╡ 329a0fda-a403-4fbf-af01-019ea7e6f7f0
-F(ϵ*x + η*y,y) |> expand_linear(Multilinear)
+# ╔═╡ f7344d42-c926-485b-a041-11c980cd3522
+begin
+using BenchmarkTools
 
-# ╔═╡ 9b991e37-3edd-4c2b-8409-b28da7ccb326
-F(ϵ*x + η*y,y) |> (x -> is_multilinear(x))
+### Define Perturbations
+ϵ = variable("\\epsilon", Type{:Background} => 1)
+η = variable("\\eta", Type{:Wave} => 1)
 
-# ╔═╡ 3b557bcb-ff3f-4f4e-ac44-f54043a59b9f
+Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wave} => η]))
 
+### Define expansion variables
+n_expansion = 2
+g = [variable("g_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+h = [variable("h_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+θ = [variable("\\theta_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+ϕ = [variable("\\phi_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
 
-# ╔═╡ db185faa-686b-41d7-8859-1595551706a0
-merge(F.metadata, Base.ImmutableDict(Type{Slots} => Slots{3}(TotalSymmetry([[1,2,3]]))))
+### Define operators
+G = operator(TensorDisplay("G","ab",""), Slots{2}(AnalyticOperator([1,2])))
+T = operator(TensorDisplay("T","ab","\\vartheta"), Slots{2}(AnalyticOperator([1,2])))
+V = operator(TensorDisplay("V","ab","\\textrm{int}"), Slots{2}(AnalyticOperator([1,2])))
 
-# ╔═╡ 0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
+ϵ_list = [ϵ^i for i ∈ 0:2]
+args = [sum(g.*ϵ_list) + η*sum(h.*ϵ_list), sum(θ.*ϵ_list) + η*sum(ϕ.*ϵ_list)]
 
-
-# ╔═╡ 2fcb430c-96df-4480-9db2-5ef6ec630e98
-g0 = variable("g_0",Dict([Type{NotScalar{Multilinear}} => true]))
-
-# ╔═╡ 60d81965-801c-479b-951c-5742a1ed86aa
-g1 = variable("g_1",Dict([Type{NotScalar{Multilinear}} => true]))
+expr = G(args...) - T(args...) - ϵ*V(args...)
+	
+end
 
 # ╔═╡ 6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
 begin
@@ -377,30 +376,26 @@ struct AnalyticOperator <: AbstractAnalyticOperator
 	indices::Vector{Int64}
 end
 
+struct OperatorExpansion <: AbstractSlotStructure
+	order::Vector{Int64}
+end
+
+function expansion_order(x::Slots{N}, original_slots) where {N}
+	get(x,Type{OperatorExpansion}, (nothing,))
+end
+expansion_order(x) = (nothing,)
+expansion_order(x::Term{NewTensor}) = expansion_order(Slots(x))
+order_match(x, order::Union{Tuple,Vector}) = (order == (nothing,)) ? false : all(expansion_order(x) .== order)
+order_match(x, order::Function) = (order == (nothing,)) ? false : order())
+	
+
 is_analytic(x::Slots) = Type{AnalyticOperator} ∈ keys(x.slot_structures)
 is_analytic(x::Term{NewTensor}) = is_analytic(Slots(x))
 analytic_indices(x::Slots) = x.slot_structures[Type{AnalyticOperator}].indices
 
-F3 = operator(
-	TensorDisplay("F","\\textrm{analytic}",""), 
-	Slots{2}(AnalyticOperator([1,2]))
-)
-
-G1 = operator(
-	TensorDisplay("F","\\textrm{expansion}","[0,1]"),
-	Slots{1}(Multilinear([1]))
-)
-G2 = operator(
-	TensorDisplay("F","\\textrm{expansion}","[1,0]"),
-	Slots{1}(Multilinear([1]))
-)
-G3 = operator(
-	TensorDisplay("F","\\textrm{expansion}","[1,1]"),
-	Slots{2}(Multilinear([1,2]), TotalSymmetry([[1,2]]))
-)
-
 is_an_Add(x::Add) = true
 is_an_Add(x) = false
+should_expand_analytic(x) = false
 function should_expand_analytic(x::Term{NewTensor})
 	if !is_analytic(x)
 		return false
@@ -412,108 +407,91 @@ fixed_order_term(a::Vector,b::Union{Vector{Int},Tuple}) = Iterators.flatten([col
 
 function all_combs(target_order, n_slots)
 	a = Iterators.product(repeat([0:target_order],n_slots)...) |> collect
-	[i for i ∈ vcat(a...) if sum(i) ≤ target_order]
+	[collect(i) for i ∈ vcat(a...) if sum(i) ≤ target_order]
 end
 
-function make_expanded_term_like(old::Term{NewTensor}, order::Vector{Int}; Linearity=Multilinear, Symmetry=TotalSymmetry)
+is_zero(x::Number) = (x == 0)
+is_zero(x::Union{Sym,Add,Mul,Term,Pow}) = false
+
+function is_zero_at_this_order(args::Vector, order::Vector{Int})
+	inds = findall(x -> x != 0, order)
+	any(is_zero.(args[inds]))
+end
+
+function make_expanded_term_like(old::Term{NewTensor}, args::Vector, order::Vector{Int64}; Linearity=Multilinear, Symmetry=TotalSymmetry)
 	F = operation(old)
 	display = TensorDisplay(old)
 	new_display = append_sup(display, "$(order)")
-	args = arguments(old)
 	old_slot_struct = Slots(old)
 	new_slot_number = sum(order)
 	NewSlotStructureNeeded = Slots{new_slot_number}(
 		Multilinear(collect(1:new_slot_number)),
-		TotalSymmetry([collect(1:order[1]),collect(order[1] .+ 1:order[2])])
+		TotalSymmetry([collect(1:order[1]),collect(order[1] .+ 1:order[2])]),
+		OperatorExpansion(order)
 	)
 	NewSlotStructureNeeded = merge_together(old_slot_struct, NewSlotStructureNeeded)
+	remove_structure!(NewSlotStructureNeeded, Type{AnalyticOperator})
 	new_metadata = Base.ImmutableDict(Type{Slots} => NewSlotStructureNeeded)
 	new_metadata = merge(F.metadata, new_metadata)
 	F_new = operator(new_display, NewSlotStructureNeeded, new_metadata)
 	F_new(fixed_order_term(args,order)...)
 end
 
-function analytic_expand_term(x::Term{NewTensor}, order::Int)
+order_seperate(x::Add, Ξ::APT) = seperate_orders(x,Ξ)
+order_seperate(x::Union{Mul,Term,Sym,Pow}, Ξ::APT) = Dict([Tuple(pert(x,Ξ)) => x])
+
+function seperate_zeroth_and_higher(x::Union{Add,Mul,Term,Sym,Pow},Ξ::APT)
+	ords = order_seperate(x,Ξ)
+	zeroth = get(ords,(0,0),0)
+	non_zeroth = x - zeroth
+	(zeroth,non_zeroth)
+end
+seperate_zeroth_and_higher(Ξ::APT) = (x -> seperate_zeroth_and_higher(x,Ξ))
 	
+function analytic_expand_term(x::Term{NewTensor}, total_order::Int, Ξ::APT)	
 	N_slots = number_of_slots(x)
+	F = operation(x)
 	args = arguments(x)
+	terms = seperate_zeroth_and_higher(Ξ).(expand.(arguments(x)))
+	zeroth_args = [a[1] for a in terms]
+	new_args = [a[2] for a in terms]
+	all_extra_terms = [make_expanded_term_like(x, new_args, order) for order ∈ all_combs(total_order, N_slots) if (sum(order) != 0) && !(is_zero_at_this_order(new_args,order))]
+	if length(all_extra_terms) == 0
+		linear_terms = 0
+	else
+		linear_terms = sum(all_extra_terms)
+	end
+	return F(zeroth_args...) + linear_terms
 end
+analytic_expand_term(Ξ::APT, total_order::Int) = (x -> analytic_expand_term(x, total_order, Ξ))
 
+
+r2(Ξ::APT, total_order::Int) = @rule ~x::(z -> should_expand_analytic(z)) => analytic_expand_term(x,total_order,Ξ)
+
+expand_analytic(x, Ξ::APT, total_order::Int) = simplify(x,Prewalk(PassThrough(r2(Ξ, total_order))))
+
+expand_analytic(Ξ::APT, total_order::Int) = (x -> expand_analytic(x, Ξ, total_order))
 	
-aav = G1(g0+ϵ*g1) + G2(g0+ϵ*g1) + G3(g0+ϵ*g1,g0+ϵ*g1) |> expand_linear(Multilinear) |> canonicalize |> simplify |> seperate_orders(Ξ)
-
- 
+md"> Perturbation Expansions implemented" 
 end
 
-# ╔═╡ 59e3c9f9-1035-4d79-8f0b-3b91ba11b6ae
-begin
+# ╔═╡ faa4e0e7-0277-403c-9b3f-cad7580773db
+all((nothing,) .== 0)
 
-make_expanded_term_like(F3(x,x+y),[1,3]) |> expand_linear(Multilinear) |> canonicalize |> simplify
-end
+# ╔═╡ 96775daf-b745-4ec9-880e-51b14aa4fb3e
+r3(p::Function) = @rule ~x::(z -> order_match(z,p)) => x
 
-# ╔═╡ b52da822-984d-4fc5-9cb0-615b50a441e6
-operation(make_expanded_term_like(F3(x,x+y),[1,3])).metadata
+expand_analytic(x, Ξ::APT, total_order::Int) = simplify(x,Prewalk(PassThrough(r2(Ξ, total_order))))
 
-# ╔═╡ 62738094-aee0-4be1-8b7a-e6076e6622bd
-begin
-testlist = [x,y]
 
-#fixed_order_term(a::Vector,b::Union{Tuple,Vector{Int}}) = Iterators.flatten([collect(repeat([a[i]],b[i])) for i ∈ 1:length(b)]) |> collect
-	
-fixed_order_term(testlist,[2,1])
-end
+# ╔═╡ 16b6afc9-deae-4b36-85c4-d13ebd7df70d
+(nothing,) == (nothing,)
 
-# ╔═╡ 7808d878-b846-4bd2-9d0f-f423ed8faaf3
-[(comb,fixed_order_term(testlist, comb)) for comb in all_combs(5,2)]
+# ╔═╡ 79b7af3b-5b31-437e-b30a-da47f24af0a4
+ll = expr |> expand_analytic(Ξ,3) |> expand_linear(Multilinear) |> canonicalize |> seperate_orders(Ξ;divide=true)
 
-# ╔═╡ 4d404e8b-a05e-4ec5-a695-d61f0f5529e9
-F3(x,y) |> TensorDisplay
-
-# ╔═╡ 2e4aeb4f-eea0-476f-94cf-919237899dd2
-number_of_slots(F3(x,y))
-
-# ╔═╡ a3a23c75-b53f-4435-b9b5-0ffe3c6ea706
-is_scalar(g1,Multilinear)
-
-# ╔═╡ e2d859a9-9f82-458f-8592-6a41fc21cb59
-F(ϵ*g1 + η*g0,g1 + g0) |> expand_linear(Multilinear) |> canonicalize |> simplify
-
-# ╔═╡ 067c5e3f-a288-4163-9c51-acc7a69ae419
-expand_additions(g0*x,Multilinear)
-
-# ╔═╡ 0f5bf7ee-c19c-4cf8-bb29-a49b051432bb
-#((expand.(arguments(aa)))[1] |> (x -> arguments(arguments(x)[2])[1])).metadata
-
-# ╔═╡ 92d2b55b-42a7-4486-871d-cb688e0149c5
-(arguments(arguments(aa[1])[2])[1].metadata |> keys |> collect)
-
-# ╔═╡ 5d29f5a5-ab4b-46a1-a088-834003926034
-(η.metadata |> keys |> collect)[1] |> typeof
-
-# ╔═╡ c6b75e26-b9d7-46a2-b8f3-aee30df320de
-(expand_additions(η*ϵ*x + 3,Multilinear))
-
-# ╔═╡ 5bd0de68-c017-4d61-9889-2629ffb56cf6
-(η.metadata |> keys |> collect)[1]
-
-# ╔═╡ 6a98a963-c288-4f15-9f31-a6c21b6fd36a
-begin
-struct Ali end
-a = Dict([Ali => 3])
-end
-
-# ╔═╡ a62433a3-d4a1-4ab1-bbf7-837701f9fb68
-collect(keys(a))[1]
-
-# ╔═╡ 53e01eba-125c-4a20-b156-46ae2352d69a
-argument_should_expand(arguments(F(2*x,y+4))[2], Multilinear)
-
-# ╔═╡ 921085c6-a61b-4f1b-be73-65c38d00e26d
-begin
-	stuff = F(2*x,y+4) |> expand_linear(Multilinear)
-	newstuff = Iterators.product(stuff...) |> collect |> vec
-	sum([prod([s[1] for s ∈ a])*F([s[2] for s ∈ a]...) for a ∈ newstuff])
-end
+# ╔═╡ 9eccf0d4-ad3a-45ce-881b-49f18450df09
+ll[(1,2)] |> arguments
 
 # ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
 md"""
@@ -584,11 +562,13 @@ end
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 SymbolicUtils = "d1185830-fcd6-423d-90d6-eec64667417b"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
+BenchmarkTools = "~1.3.1"
 LaTeXStrings = "~1.3.0"
 SymbolicUtils = "~0.19.7"
 Symbolics = "~4.4.3"
@@ -650,6 +630,12 @@ uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 git-tree-sha1 = "aebf55e6d7795e02ca500a689d326ac979aaf89e"
 uuid = "9718e550-a3fa-408a-8086-8db961cd8217"
 version = "0.1.1"
+
+[[BenchmarkTools]]
+deps = ["JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "4c10eee4af024676200bc7752e536f858c6b8f93"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.3.1"
 
 [[Bijections]]
 git-tree-sha1 = "705e7822597b432ebe152baa844b49f8026df090"
@@ -941,6 +927,12 @@ git-tree-sha1 = "abc9885a7ca2052a736a600f7fa66209f96506e1"
 uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
 version = "1.4.1"
 
+[[JSON]]
+deps = ["Dates", "Mmap", "Parsers", "Unicode"]
+git-tree-sha1 = "3c837543ddb02250ef42f4738347454f95079d4e"
+uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+version = "0.21.3"
+
 [[LaTeXStrings]]
 git-tree-sha1 = "f2355693d6778a178ade15952b7ac47a4ff97996"
 uuid = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
@@ -1098,6 +1090,12 @@ git-tree-sha1 = "34c0e9ad262e5f7fc75b10a9952ca7692cfc5fbe"
 uuid = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 version = "0.12.3"
 
+[[Parsers]]
+deps = ["Dates"]
+git-tree-sha1 = "1285416549ccfcdf0c50d4997a94331e88d68413"
+uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
+version = "2.3.1"
+
 [[Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
@@ -1123,6 +1121,10 @@ version = "0.5.2"
 [[Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[[Profile]]
+deps = ["Printf"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 
 [[QuadGK]]
 deps = ["DataStructures", "LinearAlgebra"]
@@ -1403,43 +1405,19 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╔═╡ Cell order:
 # ╟─4c467392-ccde-11ec-15c0-4f532000315f
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
-# ╠═977b2170-886d-40d8-ada2-29385c8c8bde
-# ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
-# ╠═004ab9ee-4562-421a-ad7c-eaa91c8f96db
-# ╠═c193c17d-8eb1-4570-b97a-21e9416f0e08
-# ╠═1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
-# ╠═9fb6152d-a58e-4503-b237-6d5470e65f43
-# ╠═f4a240c6-bb13-4422-bc9f-5bf555338f10
-# ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
-# ╠═911c624b-80cb-467e-a097-179650111802
-# ╠═329a0fda-a403-4fbf-af01-019ea7e6f7f0
-# ╠═0e668e2b-5dd9-4c24-8ceb-e8c62aa3e88c
-# ╠═9b991e37-3edd-4c2b-8409-b28da7ccb326
+# ╟─977b2170-886d-40d8-ada2-29385c8c8bde
+# ╟─eb6f19bd-f750-478b-967e-39710e4f42c2
+# ╟─004ab9ee-4562-421a-ad7c-eaa91c8f96db
+# ╟─1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
+# ╟─893d798e-7376-43bc-99b1-2e65f45f1c18
 # ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
 # ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
-# ╠═59e3c9f9-1035-4d79-8f0b-3b91ba11b6ae
-# ╠═3b557bcb-ff3f-4f4e-ac44-f54043a59b9f
-# ╠═b52da822-984d-4fc5-9cb0-615b50a441e6
-# ╠═7808d878-b846-4bd2-9d0f-f423ed8faaf3
-# ╠═db185faa-686b-41d7-8859-1595551706a0
-# ╠═62738094-aee0-4be1-8b7a-e6076e6622bd
-# ╠═4d404e8b-a05e-4ec5-a695-d61f0f5529e9
-# ╠═2e4aeb4f-eea0-476f-94cf-919237899dd2
-# ╠═0a6405f8-6cfe-42ae-880f-a0b49e7e42ab
-# ╠═2fcb430c-96df-4480-9db2-5ef6ec630e98
-# ╠═60d81965-801c-479b-951c-5742a1ed86aa
-# ╠═a3a23c75-b53f-4435-b9b5-0ffe3c6ea706
-# ╠═e2d859a9-9f82-458f-8592-6a41fc21cb59
-# ╠═067c5e3f-a288-4163-9c51-acc7a69ae419
-# ╠═0f5bf7ee-c19c-4cf8-bb29-a49b051432bb
-# ╠═92d2b55b-42a7-4486-871d-cb688e0149c5
-# ╠═5d29f5a5-ab4b-46a1-a088-834003926034
-# ╠═c6b75e26-b9d7-46a2-b8f3-aee30df320de
-# ╠═5bd0de68-c017-4d61-9889-2629ffb56cf6
-# ╠═6a98a963-c288-4f15-9f31-a6c21b6fd36a
-# ╠═a62433a3-d4a1-4ab1-bbf7-837701f9fb68
-# ╠═53e01eba-125c-4a20-b156-46ae2352d69a
-# ╠═921085c6-a61b-4f1b-be73-65c38d00e26d
+# ╠═faa4e0e7-0277-403c-9b3f-cad7580773db
+# ╠═f7344d42-c926-485b-a041-11c980cd3522
+# ╠═96775daf-b745-4ec9-880e-51b14aa4fb3e
+# ╠═16b6afc9-deae-4b36-85c4-d13ebd7df70d
+# ╠═79b7af3b-5b31-437e-b30a-da47f24af0a4
+# ╠═9eccf0d4-ad3a-45ce-881b-49f18450df09
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
 # ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
