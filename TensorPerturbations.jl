@@ -104,7 +104,7 @@ struct TotalSymmetry <: SymmetrySlotStructure
 end
 	
 struct Slots{N}
-	slot_structures::Dict{DataType, AbstractSlotStructure}
+	slot_structures::Base.ImmutableDict{DataType, AbstractSlotStructure}
 end
 Slots{N}(x::AbstractSlotStructure...) where {N} = Slots{N}(Dict([Type{typeof(x1)} => x1 for x1 in x]))
 merge_together(x::Slots{N}, y::Slots{M}) where {N,M} = Slots{M}(merge(x.slot_structures,y.slot_structures))
@@ -337,35 +337,6 @@ end
 md"> Adding Perturbations"
 end
 
-# ╔═╡ f7344d42-c926-485b-a041-11c980cd3522
-begin
-using BenchmarkTools
-
-### Define Perturbations
-ϵ = variable("\\epsilon", Type{:Background} => 1)
-η = variable("\\eta", Type{:Wave} => 1)
-
-Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wave} => η]))
-
-### Define expansion variables
-n_expansion = 2
-g = [variable("g_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
-h = [variable("h_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
-θ = [variable("\\theta_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
-ϕ = [variable("\\phi_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
-
-### Define operators
-G = operator(TensorDisplay("G","ab",""), Slots{2}(AnalyticOperator([1,2])))
-T = operator(TensorDisplay("T","ab","\\vartheta"), Slots{2}(AnalyticOperator([1,2])))
-V = operator(TensorDisplay("V","ab","\\textrm{int}"), Slots{2}(AnalyticOperator([1,2])))
-
-ϵ_list = [ϵ^i for i ∈ 0:2]
-args = [sum(g.*ϵ_list) + η*sum(h.*ϵ_list), sum(θ.*ϵ_list) + η*sum(ϕ.*ϵ_list)]
-
-expr = G(args...) - T(args...) - ϵ*V(args...)
-	
-end
-
 # ╔═╡ 6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
 begin
 
@@ -380,14 +351,15 @@ struct OperatorExpansion <: AbstractSlotStructure
 	order::Vector{Int64}
 end
 
-function expansion_order(x::Slots{N}, original_slots) where {N}
-	get(x,Type{OperatorExpansion}, (nothing,))
-end
-expansion_order(x) = (nothing,)
-expansion_order(x::Term{NewTensor}) = expansion_order(Slots(x))
-order_match(x, order::Union{Tuple,Vector}) = (order == (nothing,)) ? false : all(expansion_order(x) .== order)
-order_match(x, order::Function) = (order == (nothing,)) ? false : order())
+is_expansion(x) = false
+is_expansion(x::Slots) = Type{OperatorExpansion} ∈ keys(x.slot_structures)
+is_expansion(x::Term{NewTensor}) = is_expansion(Slots(x))
 	
+expansion_order(x) = (nothing,)
+expansion_order(x::Slots) = x.order
+expansion_order(x::Term{NewTensor}) = expansion_order(Slots(x))
+
+order_match(x, order::Union{Tuple,Vector}) = all(expansion_order(x) .== order)
 
 is_analytic(x::Slots) = Type{AnalyticOperator} ∈ keys(x.slot_structures)
 is_analytic(x::Term{NewTensor}) = is_analytic(Slots(x))
@@ -418,7 +390,7 @@ function is_zero_at_this_order(args::Vector, order::Vector{Int})
 	any(is_zero.(args[inds]))
 end
 
-function make_expanded_term_like(old::Term{NewTensor}, args::Vector, order::Vector{Int64}; Linearity=Multilinear, Symmetry=TotalSymmetry)
+function make_expanded_term_like(old::Term{NewTensor}, args::Vector, order::Vector{Int}; Linearity=Multilinear, Symmetry=TotalSymmetry, OperatorExpansion=OperatorExpansion)
 	F = operation(old)
 	display = TensorDisplay(old)
 	new_display = append_sup(display, "$(order)")
@@ -475,20 +447,91 @@ expand_analytic(Ξ::APT, total_order::Int) = (x -> expand_analytic(x, Ξ, total_
 md"> Perturbation Expansions implemented" 
 end
 
+# ╔═╡ f7344d42-c926-485b-a041-11c980cd3522
+begin
+using BenchmarkTools
+
+### Define Perturbations
+ϵ = variable("\\epsilon", Type{:Background} => 1)
+η = variable("\\eta", Type{:Wave} => 1)
+
+Ξ = PerturbationParameters(Dict([Type{:Background} => ϵ, Type{:Wave} => η]))
+
+### Define expansion variables
+n_expansion = 2
+g = [variable("g_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+h = [variable("h_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+θ = [variable("\\theta_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+ϕ = [variable("\\phi_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+
+### Define operators
+G = operator(TensorDisplay("G","ab",""), Slots{2}(AnalyticOperator([1,2])))
+T = operator(TensorDisplay("T","ab","\\vartheta"), Slots{2}(AnalyticOperator([1,2])))
+V = operator(TensorDisplay("V","ab","\\textrm{int}"), Slots{2}(AnalyticOperator([1,2])))
+
+ϵ_list = [ϵ^i for i ∈ 0:2]
+args = [sum(g.*ϵ_list) + η*sum(h.*ϵ_list), sum(θ.*ϵ_list) + η*sum(ϕ.*ϵ_list)]
+
+expr = G(args...) - T(args...) - ϵ*V(args...)
+	
+end
+
 # ╔═╡ faa4e0e7-0277-403c-9b3f-cad7580773db
-all((nothing,) .== 0)
+
 
 # ╔═╡ 96775daf-b745-4ec9-880e-51b14aa4fb3e
-r3(p::Function) = @rule ~x::(z -> order_match(z,p)) => x
+begin
+	r3(p::Function) = @rule ~x::(z -> (is_expansion(z) && order_match(z,p))) => 0
+	
+	set_orders_to_zero(x, p::Function) = simplify(x,Prewalk(PassThrough(r3(p))))
+	set_orders_to_zero(p::Function) = (x -> set_orders_to_zero(x, p))
+end
 
-expand_analytic(x, Ξ::APT, total_order::Int) = simplify(x,Prewalk(PassThrough(r2(Ξ, total_order))))
+# ╔═╡ 9527564e-2d38-4e35-b27a-5576e957ba7f
+gg = ((G(g[1]+ϵ*g[2],θ[1]+ϵ*θ[2]) |> expand_analytic(Ξ,2) |> expand_linear(Multilinear)) |> arguments)[1] |> (x -> arguments(x)[2]) 
+
+# ╔═╡ a4ebd20c-4cd6-4e62-88fd-1cd6bae0881b
 
 
-# ╔═╡ 16b6afc9-deae-4b36-85c4-d13ebd7df70d
-(nothing,) == (nothing,)
+# ╔═╡ bcebdd54-6767-40a0-9d06-3ec0c59b28f0
+pp = (G(g[1]+ϵ*g[2],θ[1]+ϵ*θ[2]) |> expand_analytic(Ξ,2) |> expand_linear(Multilinear)) |> seperate_orders(Ξ;divide=true)
+
+# ╔═╡ d1010861-5466-441f-b2d7-8a7534da1070
+kk = ((pp[(1,0)] |> arguments)[1])
+
+# ╔═╡ e75f38aa-2d47-477a-abd2-8886320d993d
+operation(gg |> expand).metadata
+
+# ╔═╡ a90000f2-efd9-4279-9da0-b8b702ef1618
+@which expand(gg)
+
+# ╔═╡ 876b5bbd-bd52-43db-bd01-97f814e4ed72
+
+
+# ╔═╡ 59d6948a-90f6-4b56-8a2c-eae369d8d83c
+similarterm(gg, operation(gg), arguments(gg)) |> Slots
+
+# ╔═╡ 52138b9e-55ac-4e63-a7cd-a1adb50b054e
+kk |> Slots
+
+# ╔═╡ 6676fd9b-1fb2-456c-aec4-d4a104418e7a
+begin
+aa = Dict([1 => 2])
+get(aa,1,nothing)
+aa
+end
 
 # ╔═╡ 79b7af3b-5b31-437e-b30a-da47f24af0a4
 ll = expr |> expand_analytic(Ξ,3) |> expand_linear(Multilinear) |> canonicalize |> seperate_orders(Ξ;divide=true)
+
+# ╔═╡ 16b6afc9-deae-4b36-85c4-d13ebd7df70d
+aterm = ((ll[(1,2)] |> arguments)[1] |> arguments)[2]
+
+# ╔═╡ f74936f9-263b-49c5-b1f0-ccfa8ce1a623
+aterm |> Slots
+
+# ╔═╡ 5ddbc2ca-2896-4840-b593-47af176fea8c
+make_expanded_term_like(aterm,arguments(aterm),[1,2]) |> Slots
 
 # ╔═╡ 9eccf0d4-ad3a-45ce-881b-49f18450df09
 ll[(1,2)] |> arguments
@@ -1406,7 +1449,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╟─4c467392-ccde-11ec-15c0-4f532000315f
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
 # ╟─977b2170-886d-40d8-ada2-29385c8c8bde
-# ╟─eb6f19bd-f750-478b-967e-39710e4f42c2
+# ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
 # ╟─004ab9ee-4562-421a-ad7c-eaa91c8f96db
 # ╟─1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
 # ╟─893d798e-7376-43bc-99b1-2e65f45f1c18
@@ -1415,7 +1458,19 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═faa4e0e7-0277-403c-9b3f-cad7580773db
 # ╠═f7344d42-c926-485b-a041-11c980cd3522
 # ╠═96775daf-b745-4ec9-880e-51b14aa4fb3e
+# ╠═9527564e-2d38-4e35-b27a-5576e957ba7f
 # ╠═16b6afc9-deae-4b36-85c4-d13ebd7df70d
+# ╠═a4ebd20c-4cd6-4e62-88fd-1cd6bae0881b
+# ╠═bcebdd54-6767-40a0-9d06-3ec0c59b28f0
+# ╠═d1010861-5466-441f-b2d7-8a7534da1070
+# ╠═e75f38aa-2d47-477a-abd2-8886320d993d
+# ╠═a90000f2-efd9-4279-9da0-b8b702ef1618
+# ╠═876b5bbd-bd52-43db-bd01-97f814e4ed72
+# ╠═59d6948a-90f6-4b56-8a2c-eae369d8d83c
+# ╠═52138b9e-55ac-4e63-a7cd-a1adb50b054e
+# ╠═f74936f9-263b-49c5-b1f0-ccfa8ce1a623
+# ╠═5ddbc2ca-2896-4840-b593-47af176fea8c
+# ╠═6676fd9b-1fb2-456c-aec4-d4a104418e7a
 # ╠═79b7af3b-5b31-437e-b30a-da47f24af0a4
 # ╠═9eccf0d4-ad3a-45ce-881b-49f18450df09
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
