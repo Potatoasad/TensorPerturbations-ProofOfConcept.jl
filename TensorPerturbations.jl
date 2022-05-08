@@ -104,7 +104,7 @@ struct TotalSymmetry <: SymmetrySlotStructure
 end
 	
 struct Slots{N}
-	slot_structures::Base.ImmutableDict{DataType, AbstractSlotStructure}
+	slot_structures::Dict{DataType, AbstractSlotStructure}
 end
 Slots{N}(x::AbstractSlotStructure...) where {N} = Slots{N}(Dict([Type{typeof(x1)} => x1 for x1 in x]))
 merge_together(x::Slots{N}, y::Slots{M}) where {N,M} = Slots{M}(merge(x.slot_structures,y.slot_structures))
@@ -356,7 +356,7 @@ is_expansion(x::Slots) = Type{OperatorExpansion} ∈ keys(x.slot_structures)
 is_expansion(x::Term{NewTensor}) = is_expansion(Slots(x))
 	
 expansion_order(x) = (nothing,)
-expansion_order(x::Slots) = x.order
+expansion_order(x::Slots) = x.slot_structures[Type{OperatorExpansion}].order
 expansion_order(x::Term{NewTensor}) = expansion_order(Slots(x))
 
 order_match(x, order::Union{Tuple,Vector}) = all(expansion_order(x) .== order)
@@ -477,64 +477,18 @@ expr = G(args...) - T(args...) - ϵ*V(args...)
 end
 
 # ╔═╡ faa4e0e7-0277-403c-9b3f-cad7580773db
-
-
-# ╔═╡ 96775daf-b745-4ec9-880e-51b14aa4fb3e
 begin
-	r3(p::Function) = @rule ~x::(z -> (is_expansion(z) && order_match(z,p))) => 0
-	
-	set_orders_to_zero(x, p::Function) = simplify(x,Prewalk(PassThrough(r3(p))))
-	set_orders_to_zero(p::Function) = (x -> set_orders_to_zero(x, p))
+r3(p::Function) = @rule ~x::(z -> (is_expansion(z) && p(expansion_order(z)))) => 0	
+set_orders_to_zero(x, p::Function) = simplify(x,Prewalk(PassThrough(r3(p))))
+set_orders_to_zero(p::Function) = (x -> set_orders_to_zero(x, p))
+
+
+
+md"> Putting in assumptions based on order"
 end
 
 # ╔═╡ 9527564e-2d38-4e35-b27a-5576e957ba7f
 gg = ((G(g[1]+ϵ*g[2],θ[1]+ϵ*θ[2]) |> expand_analytic(Ξ,2) |> expand_linear(Multilinear)) |> arguments)[1] |> (x -> arguments(x)[2]) 
-
-# ╔═╡ a4ebd20c-4cd6-4e62-88fd-1cd6bae0881b
-
-
-# ╔═╡ bcebdd54-6767-40a0-9d06-3ec0c59b28f0
-pp = (G(g[1]+ϵ*g[2],θ[1]+ϵ*θ[2]) |> expand_analytic(Ξ,2) |> expand_linear(Multilinear)) |> seperate_orders(Ξ;divide=true)
-
-# ╔═╡ d1010861-5466-441f-b2d7-8a7534da1070
-kk = ((pp[(1,0)] |> arguments)[1])
-
-# ╔═╡ e75f38aa-2d47-477a-abd2-8886320d993d
-operation(gg |> expand).metadata
-
-# ╔═╡ a90000f2-efd9-4279-9da0-b8b702ef1618
-@which expand(gg)
-
-# ╔═╡ 876b5bbd-bd52-43db-bd01-97f814e4ed72
-
-
-# ╔═╡ 59d6948a-90f6-4b56-8a2c-eae369d8d83c
-similarterm(gg, operation(gg), arguments(gg)) |> Slots
-
-# ╔═╡ 52138b9e-55ac-4e63-a7cd-a1adb50b054e
-kk |> Slots
-
-# ╔═╡ 6676fd9b-1fb2-456c-aec4-d4a104418e7a
-begin
-aa = Dict([1 => 2])
-get(aa,1,nothing)
-aa
-end
-
-# ╔═╡ 79b7af3b-5b31-437e-b30a-da47f24af0a4
-ll = expr |> expand_analytic(Ξ,3) |> expand_linear(Multilinear) |> canonicalize |> seperate_orders(Ξ;divide=true)
-
-# ╔═╡ 16b6afc9-deae-4b36-85c4-d13ebd7df70d
-aterm = ((ll[(1,2)] |> arguments)[1] |> arguments)[2]
-
-# ╔═╡ f74936f9-263b-49c5-b1f0-ccfa8ce1a623
-aterm |> Slots
-
-# ╔═╡ 5ddbc2ca-2896-4840-b593-47af176fea8c
-make_expanded_term_like(aterm,arguments(aterm),[1,2]) |> Slots
-
-# ╔═╡ 9eccf0d4-ad3a-45ce-881b-49f18450df09
-ll[(1,2)] |> arguments
 
 # ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
 md"""
@@ -1457,22 +1411,7 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
 # ╠═faa4e0e7-0277-403c-9b3f-cad7580773db
 # ╠═f7344d42-c926-485b-a041-11c980cd3522
-# ╠═96775daf-b745-4ec9-880e-51b14aa4fb3e
 # ╠═9527564e-2d38-4e35-b27a-5576e957ba7f
-# ╠═16b6afc9-deae-4b36-85c4-d13ebd7df70d
-# ╠═a4ebd20c-4cd6-4e62-88fd-1cd6bae0881b
-# ╠═bcebdd54-6767-40a0-9d06-3ec0c59b28f0
-# ╠═d1010861-5466-441f-b2d7-8a7534da1070
-# ╠═e75f38aa-2d47-477a-abd2-8886320d993d
-# ╠═a90000f2-efd9-4279-9da0-b8b702ef1618
-# ╠═876b5bbd-bd52-43db-bd01-97f814e4ed72
-# ╠═59d6948a-90f6-4b56-8a2c-eae369d8d83c
-# ╠═52138b9e-55ac-4e63-a7cd-a1adb50b054e
-# ╠═f74936f9-263b-49c5-b1f0-ccfa8ce1a623
-# ╠═5ddbc2ca-2896-4840-b593-47af176fea8c
-# ╠═6676fd9b-1fb2-456c-aec4-d4a104418e7a
-# ╠═79b7af3b-5b31-437e-b30a-da47f24af0a4
-# ╠═9eccf0d4-ad3a-45ce-881b-49f18450df09
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
 # ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
