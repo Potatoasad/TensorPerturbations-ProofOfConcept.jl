@@ -390,6 +390,12 @@ function is_zero_at_this_order(args::Vector, order::Vector{Int})
 	any(is_zero.(args[inds]))
 end
 
+function order_to_symmetry(order)
+	n = 1:sum(order)
+	y = cumsum(order)
+	[collect((i-1 == 0 ? 1 : y[i-1]+1):y[i]) for i ∈ 1:(length(y))]
+end
+
 function make_expanded_term_like(old::Term{NewTensor}, args::Vector, order::Vector{Int}; Linearity=Multilinear, Symmetry=TotalSymmetry, OperatorExpansion=OperatorExpansion)
 	F = operation(old)
 	display = TensorDisplay(old)
@@ -398,7 +404,7 @@ function make_expanded_term_like(old::Term{NewTensor}, args::Vector, order::Vect
 	new_slot_number = sum(order)
 	NewSlotStructureNeeded = Slots{new_slot_number}(
 		Multilinear(collect(1:new_slot_number)),
-		TotalSymmetry([collect(1:order[1]),collect(order[1] .+ 1:order[2])]),
+		TotalSymmetry(order_to_symmetry(order)),
 		OperatorExpansion(order)
 	)
 	NewSlotStructureNeeded = merge_together(old_slot_struct, NewSlotStructureNeeded)
@@ -460,35 +466,85 @@ using BenchmarkTools
 ### Define expansion variables
 n_expansion = 2
 g = [variable("g_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
-h = [variable("h_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+#h = [variable("h_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+h = variable("h", Dict([Type{NotScalar{Multilinear}} => true]))
 θ = [variable("\\theta_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
-ϕ = [variable("\\phi_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+#ϕ = [variable("\\phi_{$(i)}", Dict([Type{NotScalar{Multilinear}} => true])) for i ∈ 0:n_expansion]
+ϕ = variable("\\phi", Dict([Type{NotScalar{Multilinear}} => true]))
 
 ### Define operators
-G = operator(TensorDisplay("G","ab",""), Slots{2}(AnalyticOperator([1,2])))
+G = operator(TensorDisplay("G","ab",""), Slots{1}(AnalyticOperator([1])))
 T = operator(TensorDisplay("T","ab","\\vartheta"), Slots{2}(AnalyticOperator([1,2])))
 V = operator(TensorDisplay("V","ab","\\textrm{int}"), Slots{2}(AnalyticOperator([1,2])))
+W = operator(TensorDisplay("\\mathcal{W}","A",""), Slots{2}(AnalyticOperator([1,2])))
+ρ = operator(TensorDisplay("ρ","",""), Slots{2}(AnalyticOperator([1,2])))
 
 ϵ_list = [ϵ^i for i ∈ 0:2]
-args = [sum(g.*ϵ_list) + η*sum(h.*ϵ_list), sum(θ.*ϵ_list) + η*sum(ϕ.*ϵ_list)]
+#args = [sum(θ.*ϵ_list) + η*sum(ϕ.*ϵ_list),sum(g.*ϵ_list) + η*sum(h.*ϵ_list)]
+#args = [sum(θ.*ϵ_list) + η*ϕ,sum(g.*ϵ_list) + η*h]
+args = [ϵ*θ[2] + ϵ^2*θ[3] + η*ϕ, g[1] + ϵ^2*g[3] + η*h]
 
-expr = G(args...) - T(args...) - ϵ*V(args...)
+expr = G(args[2]) - T(args...) - ϵ*V(args...)
 	
 end
 
 # ╔═╡ faa4e0e7-0277-403c-9b3f-cad7580773db
 begin
-r3(p::Function) = @rule ~x::(z -> (is_expansion(z) && p(expansion_order(z)))) => 0	
+
+r3(p::Function) = @rule ~x::(z -> (is_expansion(z) && p(z))) => 0	
 set_orders_to_zero(x, p::Function) = simplify(x,Prewalk(PassThrough(r3(p))))
 set_orders_to_zero(p::Function) = (x -> set_orders_to_zero(x, p))
 
-
-
-md"> Putting in assumptions based on order"
+function terms_zero(x::Term{NewTensor})
+	order = expansion_order(x)
+	result = false
+	# Assumption 1: T j ≤ 2
+	result |= (TensorDisplay(x).name == "T") && (order[1] < 2)
+	# Assumption 1: W j = 0
+	result |= (TensorDisplay(x).name == "\\mathcal{W}") && (order[1] == 0)
+	# Assumption 1: V j = 0
+	result |= (TensorDisplay(x).name == "V") && (order[1] == 0)
 end
 
+
+md"""
+> Putting in assumptions based on order
+> - Assumption 1:
+>  $T^{\vartheta[j,k]}[...] = 0\textrm{ for }j \leq 2$
+> 
+>  $W^{[j,k]}[...] = 0\textrm{ for }j = 0$
+>
+>  $V^{[j,k]}_{\textrm{int}}[...] = 0\textrm{ for }j = 0$
+"""
+end
+
+# ╔═╡ 5b13b09c-c6d4-4af2-b512-8979796eb44e
+
+
+# ╔═╡ d6f42df1-9e50-4ead-984a-cc8a30f13596
+begin
+aa = true
+aa |= false
+aa
+end
+
+# ╔═╡ bc56d260-96bc-4bef-a0ba-260c071d179b
+analytic_expand_term(G(args[2]), 2, Ξ)
+
 # ╔═╡ 9527564e-2d38-4e35-b27a-5576e957ba7f
-gg = ((G(g[1]+ϵ*g[2],θ[1]+ϵ*θ[2]) |> expand_analytic(Ξ,2) |> expand_linear(Multilinear)) |> arguments)[1] |> (x -> arguments(x)[2]) 
+gg = ((expr |> expand_analytic(Ξ,4) |> expand_linear(Multilinear) |> canonicalize ))|> set_orders_to_zero(terms_zero)
+
+# ╔═╡ 2271cb49-48bf-4d21-991e-8dd69c39d896
+begin
+r4(target_order, Ξ::APT) = @rule ~x::(z -> !all(pert(z,Ξ) .≤ target_order)) => 0
+keep_lower(x, target_order, Ξ::APT) = simplify(expand(x),Prewalk(PassThrough(r4(target_order,Ξ))))
+keep_lower(target_order, Ξ::APT) = (x -> keep_lower(x, target_order, Ξ))
+
+gg |> keep_lower((2,1),Ξ) |> seperate_orders(Ξ,divide=true)
+end
+
+# ╔═╡ 607b388a-47d2-423d-a1a7-f2ad4943200b
+(arguments(arguments(gg)[1])[2]) |> terms_zero
 
 # ╔═╡ 2e58a055-39d9-4efd-a5f4-ff339993ccda
 md"""
@@ -1411,7 +1467,12 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
 # ╠═faa4e0e7-0277-403c-9b3f-cad7580773db
 # ╠═f7344d42-c926-485b-a041-11c980cd3522
+# ╠═5b13b09c-c6d4-4af2-b512-8979796eb44e
+# ╠═d6f42df1-9e50-4ead-984a-cc8a30f13596
+# ╠═bc56d260-96bc-4bef-a0ba-260c071d179b
 # ╠═9527564e-2d38-4e35-b27a-5576e957ba7f
+# ╠═2271cb49-48bf-4d21-991e-8dd69c39d896
+# ╠═607b388a-47d2-423d-a1a7-f2ad4943200b
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
 # ╟─6859d3fc-1499-449d-b181-ddd970b02120
 # ╟─83a84e8e-45b5-4189-b95c-06764b5635cc
