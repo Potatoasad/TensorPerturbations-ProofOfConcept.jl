@@ -477,7 +477,7 @@ G = operator(TensorDisplay("G","ab",""), Slots{1}(AnalyticOperator([1])))
 T = operator(TensorDisplay("T","ab","\\vartheta"), Slots{2}(AnalyticOperator([1,2])))
 V = operator(TensorDisplay("V","ab","\\textrm{int}"), Slots{2}(AnalyticOperator([1,2])))
 W = operator(TensorDisplay("\\mathcal{W}","A",""), Slots{2}(AnalyticOperator([1,2])))
-ρ = operator(TensorDisplay("ρ","",""), Slots{2}(AnalyticOperator([1,2])))
+ρ = operator(TensorDisplay("R","A",""), Slots{2}(AnalyticOperator([1,2])))
 
 ϵ_list = [ϵ^i for i ∈ 0:2]
 #args = [sum(θ.*ϵ_list) + η*sum(ϕ.*ϵ_list),sum(g.*ϵ_list) + η*sum(h.*ϵ_list)]
@@ -485,6 +485,7 @@ W = operator(TensorDisplay("\\mathcal{W}","A",""), Slots{2}(AnalyticOperator([1,
 args = [ϵ*θ[2] + ϵ^2*θ[3] + η*ϕ, g[1] + ϵ^2*g[3] + η*h]
 
 expr = G(args[2]) - T(args...) - ϵ*V(args...)
+expr2 = W(args...) - ϵ*ρ(args...)
 	
 end
 
@@ -518,21 +519,11 @@ md"""
 """
 end
 
-# ╔═╡ 5b13b09c-c6d4-4af2-b512-8979796eb44e
-
-
-# ╔═╡ d6f42df1-9e50-4ead-984a-cc8a30f13596
-begin
-aa = true
-aa |= false
-aa
-end
-
-# ╔═╡ bc56d260-96bc-4bef-a0ba-260c071d179b
-analytic_expand_term(G(args[2]), 2, Ξ)
-
 # ╔═╡ 9527564e-2d38-4e35-b27a-5576e957ba7f
 gg = ((expr |> expand_analytic(Ξ,4) |> expand_linear(Multilinear) |> canonicalize ))|> set_orders_to_zero(terms_zero)
+
+# ╔═╡ af8a86fa-222c-49f8-95b6-e9d0843e9ddd
+(expr2 |> expand_analytic(Ξ,4) |> expand_linear(Multilinear) |> canonicalize |> set_orders_to_zero(terms_zero) |> seperate_orders(Ξ,divide=true))[(1,2)] |> (x -> arguments(arguments(x)[1])[2] ) |> TensorDisplay
 
 # ╔═╡ 2271cb49-48bf-4d21-991e-8dd69c39d896
 begin
@@ -542,6 +533,12 @@ keep_lower(target_order, Ξ::APT) = (x -> keep_lower(x, target_order, Ξ))
 
 gg |> keep_lower((2,1),Ξ) |> seperate_orders(Ξ,divide=true)
 end
+
+# ╔═╡ 5a482ea3-9333-463d-b4e8-28936a3116df
+expr2 |> expand_analytic(Ξ,4) |> expand_linear(Multilinear) |> keep_lower((1,1),Ξ) |> canonicalize |> set_orders_to_zero(terms_zero)
+
+# ╔═╡ a5eee5a1-2edc-43c7-a24b-59ed106b8c97
+bb = ((expr2 |> expand_analytic(Ξ,4) |> expand_linear(Multilinear) |> canonicalize ))|> set_orders_to_zero(terms_zero)|> keep_lower((1,1),Ξ) |> seperate_orders(Ξ,divide=true)
 
 # ╔═╡ 607b388a-47d2-423d-a1a7-f2ad4943200b
 (arguments(arguments(gg)[1])[2]) |> terms_zero
@@ -1458,19 +1455,19 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╔═╡ Cell order:
 # ╟─4c467392-ccde-11ec-15c0-4f532000315f
 # ╟─9bd50b69-1f6d-4a5a-855e-15d70657742f
-# ╟─977b2170-886d-40d8-ada2-29385c8c8bde
+# ╠═977b2170-886d-40d8-ada2-29385c8c8bde
 # ╠═eb6f19bd-f750-478b-967e-39710e4f42c2
 # ╟─004ab9ee-4562-421a-ad7c-eaa91c8f96db
 # ╟─1f229cd6-8ab9-4c37-a598-b9a3b2d65c94
-# ╟─893d798e-7376-43bc-99b1-2e65f45f1c18
+# ╠═893d798e-7376-43bc-99b1-2e65f45f1c18
 # ╠═223ae6fa-bbae-42ba-a4ea-6dc2814aa521
 # ╠═6a6f7542-acfd-4f48-bff5-26ea3bfa6eb6
 # ╠═faa4e0e7-0277-403c-9b3f-cad7580773db
 # ╠═f7344d42-c926-485b-a041-11c980cd3522
-# ╠═5b13b09c-c6d4-4af2-b512-8979796eb44e
-# ╠═d6f42df1-9e50-4ead-984a-cc8a30f13596
-# ╠═bc56d260-96bc-4bef-a0ba-260c071d179b
 # ╠═9527564e-2d38-4e35-b27a-5576e957ba7f
+# ╠═af8a86fa-222c-49f8-95b6-e9d0843e9ddd
+# ╠═5a482ea3-9333-463d-b4e8-28936a3116df
+# ╠═a5eee5a1-2edc-43c7-a24b-59ed106b8c97
 # ╠═2271cb49-48bf-4d21-991e-8dd69c39d896
 # ╠═607b388a-47d2-423d-a1a7-f2ad4943200b
 # ╟─2e58a055-39d9-4efd-a5f4-ff339993ccda
